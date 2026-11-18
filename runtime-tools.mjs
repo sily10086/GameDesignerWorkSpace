@@ -6,7 +6,7 @@ import {StringDecoder} from 'node:string_decoder';
 const here=path.dirname(fileURLToPath(import.meta.url));
 export const home=process.env.GDWS_HOME||([here,path.dirname(here)].find(p=>fs.existsSync(path.join(p,'Runtime')))||here);
 export const runtime=fs.existsSync(path.join(home,'Runtime'))?path.join(home,'Runtime'):path.join(home,'runtime');
-export function toolPath(name){const candidates=name==='git'?['git/cmd/git.exe']:name==='svn'?['svn/bin/svn.exe']:name==='svnadmin'?['svn/bin/svnadmin.exe']:['node/node.exe'];return candidates.map(p=>path.join(runtime,p)).find(p=>fs.existsSync(p))||(name==='node'?process.execPath:name);}
+export function toolPath(name){const candidates=name==='git'?['git/cmd/git.exe']:name==='svn'?['svn/bin/svn-utf8.exe','svn/bin/svn.exe']:name==='svnadmin'?['svn/bin/svnadmin-utf8.exe','svn/bin/svnadmin.exe']:['node/node.exe'];return candidates.map(p=>path.join(runtime,p)).find(p=>fs.existsSync(p))||(name==='node'?process.execPath:name);}
 export const toolEnv=()=>({...process.env,PATH:[path.join(runtime,'node'),path.join(runtime,'git','cmd'),path.join(runtime,'git','usr','bin'),path.join(runtime,'git','ucrt64','bin'),path.join(runtime,'svn','bin'),process.env.PATH||'',path.join(process.env.SystemRoot||'C:\\Windows','System32')].join(path.delimiter),GIT_TERMINAL_PROMPT:'0',GCM_INTERACTIVE:'Never',GIT_CONFIG_NOSYSTEM:'1',SVN_ASP_DOT_NET_HACK:undefined});
 export function runTool(name,args,{cwd,input='',env={},timeout=180000,allowFailure=false}={}){return new Promise((resolve,reject)=>{
  const child=spawn(toolPath(name),args,{cwd,env:{...toolEnv(),...env},windowsHide:true,stdio:['pipe','pipe','pipe']});let out='',err='',settled=false;const outDecoder=new StringDecoder('utf8'),errDecoder=new StringDecoder('utf8');

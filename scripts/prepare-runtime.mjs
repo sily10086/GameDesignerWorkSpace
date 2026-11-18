@@ -23,4 +23,5 @@ const dependencies=[
  {target:'svn',executable:'bin/svn.exe',name:'Apache-Subversion-1.15.0-x64.zip',url:'https://www.visualsvn.com/files/Apache-Subversion-1.15.0-x64.zip',sha:'98bb798dd6c70cc875b9bdacd600594351cf88f0a39a831a5055df061c871bb5'},
 ];
 for(const dependency of dependencies){const target=path.join(root,'runtime',dependency.target);if(await fs.stat(path.join(target,dependency.executable)).then(()=>true,()=>false))continue;const archive=await download(dependency.url,dependency.name,dependency.sha);await expand(archive,target);}
+await import('./prepare-svn-utf8.mjs');
 console.log('Bundled Windows runtime is ready. Official archives and license files are preserved.');
