@@ -1,0 +1,9 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {toolStatus,runTool,toolPath} from './runtime-tools.mjs';
+import {fileURLToPath} from 'node:url';
+import {createServer} from './server.mjs';
+const temporary=await fs.mkdtemp(path.join(os.tmpdir(),'gdws-installed-check-'));
+let app;
+try{const tools=await toolStatus();if(Object.values(tools).some(t=>!t.available||!t.bundled))throw new Error('Bundled runtime missing.');const askpass=await runTool('git',['-c','credential.helper=','credential','fill'],{cwd:temporary,input:'protocol=https\nhost=example.invalid\n\n',env:{GIT_ASKPASS:path.join(path.dirname(fileURLToPath(import.meta.url)),'scripts','git-askpass.cmd'),GDWS_NODE_EXE:toolPath('node'),GDWS_VCS_USERNAME:'gdws-test',GDWS_VCS_PASSWORD:'fake-password-for-offline-test'}});if(!askpass.stdout.includes('username=gdws-test')||!askpass.stdout.includes('password=fake-password-for-offline-test'))throw new Error('Bundled authentication helper failed.');app=await createServer({root:temporary,dataDirectory:path.join(temporary,'Data'),externalRoot:path.join(temporary,'Projects')});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const response=await fetch('http://127.0.0.1:'+app.server.address().port+'/api/workspace');if(response.status!==200)throw new Error('Workspace API unavailable.');await fs.writeFile(process.argv[2],JSON.stringify({ok:true,tools,askpass:true,httpStatus:response.status,checkedAt:new Date().toISOString()},null,2));}catch(error){await fs.writeFile(process.argv[2],JSON.stringify({ok:false,error:error.message},null,2));process.exitCode=1;}finally{if(app)await app.close();const resolved=path.resolve(temporary);if(path.dirname(resolved)!==path.resolve(os.tmpdir())||!path.basename(resolved).startsWith('gdws-installed-check-'))throw new Error('Invalid test directory.');await fs.rm(resolved,{recursive:true,force:true,maxRetries:5,retryDelay:100});}

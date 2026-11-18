@@ -1,0 +1,16 @@
+node_modules/
+artifacts/
+*.zip
+.workbench/
+Project/
+Projects/
+Data/
+Logs/
+.gdws/
+.svn/
+*.log
+*.install-tmp
+
+build/
+runtime/
+releases/

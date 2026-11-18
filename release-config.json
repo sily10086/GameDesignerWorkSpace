@@ -1,0 +1,9 @@
+{
+  "application": "GameDesignerWorkerSpace",
+  "repository": "sily10086/GameDesignerWorkSpace",
+  "channel": "stable",
+  "platform": "win32-x64",
+  "nodeVersion": "24.15.0",
+  "gitVersion": "2.56.1.windows.1",
+  "svnVersion": "1.15.0"
+}

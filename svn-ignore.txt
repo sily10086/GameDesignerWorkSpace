@@ -1,0 +1,5 @@
+node_modules
+.workbench
+artifacts
+*.zip
+*.tmp

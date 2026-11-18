@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {pathToFileURL} from 'node:url';
+import {ProjectStore} from '../storage.mjs';
+import {RepositoryManager,validateRepoURL} from '../vcs.mjs';
+import {defaultWorkspace,makeProject} from '../dist/project-model.js';
+import {runTool,toolStatus} from '../runtime-tools.mjs';
+const root=await fs.mkdtemp(path.join(os.tmpdir(),'gdws-repository-test-'));
+const empty={schema:1,active:null,projects:[]};
+const clone=value=>structuredClone(value);
+async function instance(name){const store=new ProjectStore(path.join(root,name),{dataDirectory:path.join(root,name+'-data'),externalRoot:path.join(root,name+'-projects')});await store.init();return {store,manager:new RepositoryManager(store)};}
+try{
+ const tools=await toolStatus();assert.ok(tools.node.bundled&&tools.git.bundled&&tools.svn.bundled,'all required tools must be bundled');
+ assert.throws(()=>validateRepoURL('https://user:secret@example.invalid/repo.git'));assert.throws(()=>validateRepoURL('--upload-pack=bad'));assert.equal(validateRepoURL('git@example.invalid:team/project.git'),'git@example.invalid:team/project.git');
+ const A=await instance('app-a'),B=await instance('app-b');const original=defaultWorkspace(),id=original.projects[0].id;
+ await A.store.save(empty,original);const directory=A.store.getLocation(id);assert.ok(directory.startsWith(A.store.externalRoot+path.sep));assert.equal(await fs.readFile(path.join(directory,'project-format.json'),'utf8').then(t=>JSON.parse(t).version),1);
+ const remote=path.join(root,'game-one.git');await runTool('git',['init','--bare','--initial-branch=main',remote],{cwd:root});const gitURL=pathToFileURL(remote).href;
+ await A.manager.bind(id,{type:'git',url:gitURL,branch:'main',authorName:'Project Tester',authorEmail:'tester@example.invalid'});
+ await fs.writeFile(path.join(directory,'设计笔记@v1.txt'),'Delete this tracked note later.');await A.manager.upload(id,{message:'Initial independent project'});
+ const tree=(await runTool('git',['--git-dir='+remote,'ls-tree','-r','--name-only','HEAD'],{cwd:root})).stdout;
+ assert.ok(tree.includes('project.json'));assert.ok(tree.includes('project-format.json'));assert.ok(!tree.includes('server.mjs'));assert.ok(!tree.includes('runtime/node'));assert.ok(tree.includes('.gdws/repository.json'));
+ const imported=await B.manager.importLink({type:'git',url:gitURL,branch:'main'});assert.equal(imported.projectId,id);assert.equal((await B.manager.status(id)).changes.length,0);
+ const beforeB=await B.store.load(),afterB=clone(beforeB);afterB.projects[0].tasks[0].description+='\nEdited from another workbench.';await B.store.save(beforeB,afterB);await fs.unlink(path.join(imported.directory,'设计笔记@v1.txt'));const status=await B.manager.status(id);assert.ok(status.changes.some(c=>c.path==='设计笔记@v1.txt'&&c.status.includes('D')));await B.manager.upload(id,{message:'Modify task and delete tracked file'});
+ assert.ok(!(await runTool('git',['--git-dir='+remote,'ls-tree','-r','--name-only','HEAD'],{cwd:root})).stdout.includes('设计笔记@v1.txt'));await A.manager.update(id);assert.ok((await A.store.load()).projects[0].tasks[0].description.includes('Edited from another workbench.'));
+ const stateTwo=await A.store.load(),two=makeProject('另一个独立项目','解谜','Unity','独立链接验证');stateTwo.projects.push(two);await A.store.save(await A.store.load(),stateTwo);const secondRemote=path.join(root,'game-two.git');await runTool('git',['init','--bare','--initial-branch=main',secondRemote],{cwd:root});await A.manager.bind(two.id,{type:'git',url:pathToFileURL(secondRemote).href,authorName:'Other Project',authorEmail:'other@example.invalid'});await A.manager.upload(two.id,{message:'Only project two'});assert.equal(JSON.parse((await runTool('git',['--git-dir='+secondRemote,'show','HEAD:project.json'],{cwd:root})).stdout).id,two.id);
+ const baseA=await A.store.load(),changedA=clone(baseA);changedA.projects.find(p=>p.id===id).tasks[0].description+='\nRemote advance';await A.store.save(baseA,changedA);await A.manager.upload(id,{message:'Remote advance'});const baseB=await B.store.load(),staleB=clone(baseB);staleB.projects[0].tasks[0].description+='\nUnmerged local edit';await B.store.save(baseB,staleB);await assert.rejects(B.manager.upload(id,{message:'Must not force push'}),/远程分支/);
+ console.log('PASS: bundled Git, independent clone/bind/commit/push/update, tracked deletion, clean import, per-project isolation and non-fast-forward protection.');
+ const S=await instance('svn-a'),T=await instance('svn-b'),svnState=defaultWorkspace(),sid=svnState.projects[0].id;await S.store.save(empty,svnState);const svnRepo=path.join(root,'svn-repo');await runTool('svnadmin',['create',svnRepo],{cwd:root});const svnURL=pathToFileURL(svnRepo).href;await S.manager.bind(sid,{type:'svn',url:svnURL});await fs.writeFile(path.join(S.store.getLocation(sid),'设计笔记@v1.txt'),'SVN delete test');await S.manager.upload(sid,{message:'Initial SVN project'});const svnImport=await T.manager.importLink({type:'svn',url:svnURL});assert.equal(svnImport.projectId,sid);assert.equal((await T.manager.status(sid)).changes.length,0);const tBase=await T.store.load(),tNext=clone(tBase);tNext.projects[0].docs.shift();await T.store.save(tBase,tNext);await fs.unlink(path.join(svnImport.directory,'设计笔记@v1.txt'));await T.manager.upload(sid,{message:'Delete document directory and note'});const listing=(await runTool('svn',['list','--recursive',svnURL],{cwd:root})).stdout;assert.ok(!listing.includes('设计笔记@v1.txt'));await S.manager.update(sid);assert.equal((await S.store.load()).projects[0].docs.length,svnState.projects[0].docs.length-1);
+ console.log('PASS: bundled SVN checkout/bind/commit/update with deleted files and removed document directories.');
+ const moved=path.join(root,'standalone-copy');await fs.cp(directory,moved,{recursive:true});const C=await instance('other-workbench');await C.manager.attach(moved);assert.ok((await C.store.load()).projects.some(p=>p.id===id));await fs.writeFile(path.join(moved,'project-format.json'),JSON.stringify({format:'GameDesignerWorkerSpace.Project',version:99,projectId:id}));assert.equal((await C.store.load()).projects.length,0);assert.ok(C.store.mountIssues[0].error.includes('不兼容'));assert.equal(JSON.parse(await fs.readFile(path.join(moved,'project-format.json'),'utf8')).version,99);
+ const registryFile=path.join(A.store.privateDirectory,'library.json');await fs.writeFile(registryFile,'\uFEFF'+await fs.readFile(registryFile,'utf8'));const bomReader=new ProjectStore(A.store.root,{dataDirectory:A.store.privateDirectory,externalRoot:A.store.externalRoot});await bomReader.init();assert.ok((await bomReader.load()).projects.some(p=>p.id===id));
+ console.log('PASS: standalone project-folder association and incompatible-format rejection without rewriting project content.');
+}finally{const resolved=path.resolve(root);assert.equal(path.dirname(resolved),path.resolve(os.tmpdir()));assert.ok(path.basename(resolved).startsWith('gdws-repository-test-'));await fs.rm(resolved,{recursive:true,force:true,maxRetries:5,retryDelay:100});}

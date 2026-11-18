@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {parseRelease,compareVersions,checkForUpdates,REPOSITORY} from '../updates.mjs';
+const base=`https://github.com/${REPOSITORY}/releases/`;
+const release={tag_name:'v1.5.0',draft:false,prerelease:false,html_url:base+'tag/v1.5.0',body:'Workstation update',assets:[{name:'update-manifest.json',browser_download_url:base+'download/v1.5.0/update-manifest.json'}]};
+assert.equal(parseRelease(release,'1.4.0').available,true);assert.equal(parseRelease(release,'1.5.0').available,false);assert.equal(parseRelease(release,'1.6.0').available,false);assert.equal(compareVersions('1.10.0','1.9.0'),1);
+for(const changed of [{...release,prerelease:true},{...release,assets:[]},{...release,html_url:'https://example.com/update'},{...release,tag_name:'v1.5.0-rc1'}])assert.throws(()=>parseRelease(changed,'1.4.0'));
+const result=await checkForUpdates({version:'1.4.0',fetcher:async()=>({ok:true,status:200,json:async()=>release})});assert.ok(result.available);assert.ok(result.protectedDirectories.includes('Project'));assert.ok(!result.managedDirectories.includes('Project'));
+const unpublished=await checkForUpdates({version:'1.5.0',fetcher:async()=>({ok:false,status:404})});assert.ok(unpublished.unpublished&&!unpublished.available);
+await assert.rejects(checkForUpdates({version:'1.5.0',fetcher:async()=>({ok:false,status:429})}),/限制/);
+console.log('PASS: updater stable-version comparisons, official repository links, project exclusion, missing releases and network-limit handling.');

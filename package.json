@@ -1,0 +1,33 @@
+{
+  "name": "gamedesignerworkerspace",
+  "version": "1.5.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node launcher.mjs",
+    "build": "esbuild diagram-entry.js --bundle --format=esm --splitting --minify --outdir=dist/vendor --chunk-names=chunks/[name]-[hash] && node scripts/build-editor.mjs",
+    "test": "node scripts/verify.mjs",
+    "test:startup": "node scripts/verify-startup.mjs",
+    "test:library": "node scripts/verify-library.mjs",
+    "build:release": "node scripts/build-release.mjs",
+    "test:installer": "node scripts/verify-installer.mjs",
+    "build:editor": "node scripts/build-editor.mjs",
+    "test:documents": "node scripts/verify-documents.mjs",
+    "prepare:runtime": "node scripts/prepare-runtime.mjs",
+    "test:updates": "node scripts/verify-updates.mjs"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.34.0",
+    "@tiptap/extension-image": "3.34.0",
+    "@tiptap/extension-placeholder": "3.34.0",
+    "@tiptap/extension-table": "3.34.0",
+    "@tiptap/extension-task-item": "3.34.0",
+    "@tiptap/extension-task-list": "3.34.0",
+    "@tiptap/markdown": "3.34.0",
+    "@tiptap/starter-kit": "3.34.0",
+    "mermaid": "12.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.4"
+  }
+}

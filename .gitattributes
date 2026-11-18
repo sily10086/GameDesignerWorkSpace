@@ -1,0 +1,5 @@
+* text=auto
+*.cmd text eol=crlf
+Project/**/*.json text eol=lf
+Project/**/*.md text eol=lf
+Project/**/*.mmd text eol=lf
