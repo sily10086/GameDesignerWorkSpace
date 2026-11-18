@@ -41,6 +41,7 @@ await compile('Installer.cs',installer,['/target:winexe','/win32icon:'+path.join
 const baseURL='https://github.com/'+releaseConfig.repository+'/releases/download/v'+version+'/';
 async function asset(file){const data=await fs.readFile(file),name=path.basename(file);return {name,url:baseURL+name,size:data.length,sha256:createHash('sha256').update(data).digest('hex')};}
 const manifest={schema:1,application:'GameDesignerWorkerSpace',repository:releaseConfig.repository,version,platform:'win32-x64',projectFormat:1,managedRoots:['GameDesignerWorkerSpace.exe','App','Runtime','Documents'],protectedRoots:['Project','Projects','Data','Logs','.workbench','.git','.svn','.gdws'],installer:await asset(installer),portable:await asset(portable)};
+manifest.notes=await fs.readFile(path.join(root,'RELEASE_NOTES.md'),'utf8');
 await fs.writeFile(path.join(artifacts,'update-manifest.json'),JSON.stringify(manifest,null,2));
 await fs.writeFile(path.join(artifacts,'SHA256SUMS.txt'),[manifest.installer,manifest.portable].map(item=>item.sha256+'  '+item.name).join('\n')+'\n');
 console.log(JSON.stringify({directory:output,installer,portable,installerBytes:(await fs.stat(installer)).size},null,2));

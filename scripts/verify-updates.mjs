@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import {parseRelease,compareVersions,checkForUpdates,REPOSITORY} from '../updates.mjs';
+import {parseUpdateManifest,compareVersions,checkForUpdates,REPOSITORY} from '../updates.mjs';
 const base=`https://github.com/${REPOSITORY}/releases/`;
-const release={tag_name:'v1.5.0',draft:false,prerelease:false,html_url:base+'tag/v1.5.0',body:'Workstation update',assets:[{name:'update-manifest.json',browser_download_url:base+'download/v1.5.0/update-manifest.json'}]};
-assert.equal(parseRelease(release,'1.4.0').available,true);assert.equal(parseRelease(release,'1.5.0').available,false);assert.equal(parseRelease(release,'1.6.0').available,false);assert.equal(compareVersions('1.10.0','1.9.0'),1);
-for(const changed of [{...release,prerelease:true},{...release,assets:[]},{...release,html_url:'https://example.com/update'},{...release,tag_name:'v1.5.0-rc1'}])assert.throws(()=>parseRelease(changed,'1.4.0'));
-const result=await checkForUpdates({version:'1.4.0',fetcher:async()=>({ok:true,status:200,json:async()=>release})});assert.ok(result.available);assert.ok(result.protectedDirectories.includes('Project'));assert.ok(!result.managedDirectories.includes('Project'));
+const manifest={schema:1,application:'GameDesignerWorkerSpace',repository:REPOSITORY,platform:'win32-x64',version:'1.5.0',notes:'Workstation update',managedRoots:['GameDesignerWorkerSpace.exe','App','Runtime','Documents'],protectedRoots:['Project','Projects','Data','Logs','.workbench','.git','.svn','.gdws'],installer:{name:'GameDesignerWorkerSpace-Setup-1.5.0-x64.exe',url:base+'download/v1.5.0/GameDesignerWorkerSpace-Setup-1.5.0-x64.exe',sha256:'a'.repeat(64),size:10000}};
+assert.equal(parseUpdateManifest(manifest,'1.4.0').available,true);assert.equal(parseUpdateManifest(manifest,'1.5.0').available,false);assert.equal(parseUpdateManifest(manifest,'1.6.0').available,false);assert.equal(compareVersions('1.10.0','1.9.0'),1);
+for(const changed of [{...manifest,managedRoots:['Project']},{...manifest,protectedRoots:[]},{...manifest,installer:{...manifest.installer,url:'https://example.com/update'}},{...manifest,version:'1.5.0-rc1'}])assert.throws(()=>parseUpdateManifest(changed,'1.4.0'));
+const result=await checkForUpdates({version:'1.4.0',fetcher:async()=>({ok:true,status:200,json:async()=>manifest})});assert.ok(result.available);assert.ok(result.protectedDirectories.includes('Project'));assert.ok(!result.managedDirectories.includes('Project'));
 const unpublished=await checkForUpdates({version:'1.5.0',fetcher:async()=>({ok:false,status:404})});assert.ok(unpublished.unpublished&&!unpublished.available);
 await assert.rejects(checkForUpdates({version:'1.5.0',fetcher:async()=>({ok:false,status:429})}),/限制/);
 console.log('PASS: updater stable-version comparisons, official repository links, project exclusion, missing releases and network-limit handling.');
