@@ -57,6 +57,50 @@ try{
  assert.equal((await new ProjectStore(purgeRoot).load()).projects.some(q=>q.id===doomed.id),false,'重新载入不能复现已清理项目');
  assert.equal((await fs.readdir(path.join(purgeRoot,'Project'))).some(name=>name.startsWith('.purge-')),false,'清理临时目录不能残留');
 
+ // ---------- 单项目清理：只删目标，其它项目完整保留且不复现 ----------
+ const singleRoot=await tmp('gamedesigner-single-purge-test-');
+ const singleStore=new ProjectStore(singleRoot);await singleStore.init();
+ const singleStart=defaultWorkspace();
+ const singleKeep=makeProject('回收站保留项目','测试','Godot','内容完整保留');
+ const singleGone=makeProject('回收站清理项目','测试','Unity','只删这个项目');
+ singleStart.projects.push(singleKeep,singleGone);
+ await singleStore.save(empty,singleStart);
+ const singleDeleted=clone(singleStart);markProjectDeleted(singleDeleted,singleKeep.id);markProjectDeleted(singleDeleted,singleGone.id);
+ await singleStore.save(singleStart,singleDeleted);
+ const singleGoneDir=path.join(singleRoot,'Project',singleGone.id);
+ await fs.mkdir(path.join(singleGoneDir,'attachments'),{recursive:true});
+ await fs.writeFile(path.join(singleGoneDir,'attachments','note.png'),'png');
+ const singleFinal=clone(singleDeleted);assert.equal(purgeProjects(singleFinal,[singleGone.id]).length,1);
+ const singleResult=await singleStore.save(await singleStore.load(),singleFinal,{purge:[singleGone.id]});
+ assert.equal(singleResult.purged,1);assert.equal(singleResult.detached,0);
+ assert.equal(await exists(singleGoneDir),false,'单项目清理必须删除目标目录');
+ const singleAfter=await singleStore.load();
+ assert.equal(singleAfter.projects.some(q=>q.id===singleGone.id),false,'已清理项目不能通过 load 复现');
+ const kept=singleAfter.projects.find(q=>q.id===singleKeep.id);
+ assert.ok(kept,'其它回收站项目必须完整保留');
+ assert.equal(kept.deletedAt,singleDeleted.projects.find(q=>q.id===singleKeep.id).deletedAt,'其它项目的删除状态不能被改动');
+ const singleExpected=clone(singleDeleted);singleExpected.projects=singleExpected.projects.filter(q=>q.id!==singleGone.id);singleExpected.active=null;
+ const singleActual=clone(singleAfter);singleActual.active=null;
+ assert.deepEqual(workspaceFiles(singleActual),workspaceFiles(singleExpected),'其它项目内容必须完整保留');
+ assert.equal((await new ProjectStore(singleRoot).load()).projects.some(q=>q.id===singleGone.id),false,'全新 ProjectStore 不能复现已清理项目');
+
+ // ---------- 非回收站项目即使前端传了 id 也要被拒绝（409），磁盘不动 ----------
+ const activeTarget=makeProject('仍在使用不能清理','测试','Unity','');
+ let withActive=await singleStore.load();withActive.projects.push(activeTarget);await singleStore.save(await singleStore.load(),withActive);
+ const activeDir=path.join(singleRoot,'Project',activeTarget.id);
+ await fs.mkdir(path.join(activeDir,'attachments'),{recursive:true});
+ await fs.writeFile(path.join(activeDir,'attachments','keep.png'),'png');
+ // base 如实说明项目仍在使用：服务端直接拒绝。
+ const honestState=clone(withActive);honestState.projects=honestState.projects.filter(q=>q.id!==activeTarget.id);
+ await assert.rejects(singleStore.save(withActive,honestState,{purge:[activeTarget.id]}),e=>e.status===409&&/回收站/.test(e.message));
+ // base 谎称已删除：磁盘 project.json 没有 deletedAt，仍然拒绝。
+ const activeLieBase=clone(withActive);activeLieBase.projects.find(q=>q.id===activeTarget.id).deletedAt=new Date().toISOString();
+ const activeLieState=clone(activeLieBase);activeLieState.projects=activeLieState.projects.filter(q=>q.id!==activeTarget.id);
+ await assert.rejects(singleStore.save(activeLieBase,activeLieState,{purge:[activeTarget.id]}),e=>e.status===409&&/回收站/.test(e.message));
+ assert.equal(await exists(activeDir),true,'非回收站项目磁盘不能被删除');
+ assert.equal(await fs.readFile(path.join(activeDir,'attachments','keep.png'),'utf8'),'png','非回收站项目内容不能被改动');
+ assert.ok((await singleStore.load()).projects.some(q=>q.id===activeTarget.id),'非回收站项目必须仍在项目库');
+
  // ---------- 非回收站项目必须被拒绝，且不能产生半完成删除 ----------
  const second=makeProject('第二个回收站项目','测试','Unity','');
  let withSecond=await purgeStore.load();withSecond.projects.push(second);await purgeStore.save(await purgeStore.load(),withSecond);
@@ -144,7 +188,9 @@ try{
  const purgeView=clone(original);markProjectDeleted(purgeView,p.id);
  const trashHtml=libraryMarkup({state:purgeView,deleted:true,status:'saved',icon:()=>''});
  assert.ok(trashHtml.includes('data-action="purge-trash"'),'回收站要有清空按钮');
+ assert.ok(trashHtml.includes('data-purge-project'),'回收站卡片要有单项目彻底删除按钮');
  assert.ok(!libraryMarkup({state:original,status:'saved',icon:()=>''}).includes('data-action="purge-trash"'),'项目库不显示清空按钮');
+ assert.ok(!libraryMarkup({state:original,status:'saved',icon:()=>''}).includes('data-purge-project'),'项目库不显示单项目彻底删除按钮');
 
  // ---------- DiskStorage.purge：只带 ids，成功后同步 base，失败不改 base ----------
  const calls=[],originalFetch=globalThis.fetch;
@@ -188,7 +234,7 @@ try{
  const elements=new Map(),element=selector=>{if(!elements.has(selector))elements.set(selector,{innerHTML:'',textContent:'',children:[],disabled:false,classList:{add(){},remove(){}},querySelector(){return null;}});return elements.get(selector);};
  const context={document:{title:'',querySelector:element,querySelectorAll:()=>[],addEventListener(){}},window:{addEventListener(){},scrollTo(){}},sessionStorage:{setItem(){},getItem(){return null;}},crypto:webcrypto,structuredClone,TextEncoder,URL,Blob,console,setTimeout:()=>0,clearTimeout(){},makeProject,diagramTemplates,listProjects,markProjectDeleted,restoreProject,purgeProjects,validBackup:validateWorkspace,BRAND,brandMarkup,libraryMarkup,DiskStorage,setupRepositoryUI:()=>{},setupUpdateUI:()=>{},api:async()=>{throw new Error('Unexpected API call');}};
  let source=await fs.readFile(new URL('../dist/app.js',import.meta.url),'utf8');source=source.replace(/^import .*;\r?\n/gm,'').replace('void initializeWorkspace();','');
- vm.runInNewContext(source+'\n;globalThis.qa={setState:value=>{state=value;},getState:()=>state,getPage:()=>page,getActive:()=>state.active,getDisk:()=>disk,enterProject,navigate,render,purgeTrash,confirmPurgeTrash};',context);
+ vm.runInNewContext(source+'\n;globalThis.qa={setState:value=>{state=value;},getState:()=>state,getPage:()=>page,getActive:()=>state.active,getDisk:()=>disk,enterProject,navigate,render,purgeTrash,confirmPurgeTrash,confirmPurgeProject,purgeProject};',context);
  context.qa.setState(clone(original));assert.equal(context.qa.getPage(),'library');context.qa.render();assert.ok(element('#app').innerHTML.includes('library-projects'));context.qa.enterProject(p.id);assert.equal(context.qa.getPage(),'overview');assert.ok(element('#app').innerHTML.includes('返回项目库'));context.qa.navigate('library');assert.equal(context.qa.getActive(),null);assert.equal(context.qa.getPage(),'library');
  const allDeleted=clone(original);markProjectDeleted(allDeleted,p.id);context.qa.setState(allDeleted);context.qa.enterProject(p.id);assert.equal(context.qa.getPage(),'library');context.qa.render();assert.ok(element('#app').innerHTML.includes('library-new-card'));
  // 二次确认必须写明不可恢复并列出项目名。
@@ -213,7 +259,32 @@ try{
  context.qa.getDisk().purge=async()=>{emptyPurgeCalled=true;return {state:clone(original),result:{purged:0,detached:0,skipped:0,warnings:[]}};};
  context.qa.confirmPurgeTrash();assert.ok(element('#toast').textContent.includes('回收站已经是空的'));
  await context.qa.purgeTrash();assert.equal(emptyPurgeCalled,false,'空回收站不能发删除请求');
- console.log('PASS: library landing, custom names, enter/return, delete/restore, purge (internal/external/reject/atomic/idempotent), reload persistence, safe rendering, DiskStorage failure handling, and UI confirmation.');
+ // 单项目彻底删除：卡片按钮、确认文案与成功/失败行为。
+ assert.ok(trashHtml.includes('data-purge-project="'+p.id+'"'),'回收站卡片要有对应项目的彻底删除按钮');
+ context.qa.setState(clone(allDeleted));
+ context.qa.confirmPurgeProject(p.id);
+ const singleModal=element('#modal-root').innerHTML;
+ assert.ok(singleModal.includes('彻底删除项目'),'单项目弹窗标题');
+ assert.ok(singleModal.includes('不可恢复'),'单项目确认弹窗要写明不可恢复');
+ assert.ok(singleModal.includes(p.name),'单项目确认弹窗要列出项目名');
+ assert.ok(singleModal.includes('整个项目文件夹'),'内部项目要说明删除整个文件夹');
+ assert.ok(singleModal.includes('data-action="confirm-purge-project"')&&singleModal.includes('data-id="'+p.id+'"'));
+ context.qa.getDisk().projectInfo[p.id]={external:true};
+ context.qa.confirmPurgeProject(p.id);
+ assert.ok(element('#modal-root').innerHTML.includes('只解除本机关联，你自己的文件夹会保留'),'外部项目要说明只解除关联');
+ delete context.qa.getDisk().projectInfo[p.id];
+ context.qa.setState(clone(allDeleted));
+ let singleIds=null;
+ context.qa.getDisk().purge=async ids=>{singleIds=ids;const next=clone(allDeleted);next.projects=next.projects.filter(q=>!ids.includes(q.id));next.active=null;return {state:next,result:{purged:ids.length,detached:0,skipped:0,warnings:[]}};};
+ await context.qa.purgeProject(p.id);
+ assert.equal(singleIds.length,1);assert.equal(singleIds[0],p.id);assert.equal(context.qa.getState().projects.length,0);
+ assert.ok(element('#toast').textContent.includes('已彻底删除项目「'+p.name+'」'));
+ context.qa.setState(clone(allDeleted));
+ context.qa.getDisk().purge=async()=>{throw new Error('磁盘删除失败');};
+ await context.qa.purgeProject(p.id);
+ assert.equal(context.qa.getState().projects.length,1,'单项目清理失败后必须保留项目');
+ assert.ok(element('#toast').textContent.includes('未完成'));
+ console.log('PASS: library landing, custom names, enter/return, delete/restore, purge (internal/external/reject/atomic/idempotent/single), reload persistence, safe rendering, DiskStorage failure handling, and UI confirmation.');
 }finally{
  for(const dir of extras){const clean=path.resolve(dir);assert.equal(path.dirname(clean),path.resolve(os.tmpdir()));assert.ok(path.basename(clean).startsWith('gamedesigner-'),'测试目录必须在系统临时目录内');await fs.rm(clean,{recursive:true,force:true});}
 }
