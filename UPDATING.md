@@ -41,6 +41,14 @@ Gitee 安装包先发布为发行版附件，确认下载地址可用后，再�
 
 已发布版本不可原地覆盖。如需修改内容，提升版本号发布下一版，避免同一版本出现不同校验值。
 
+## v1.7.1 发布记录（2026-11-20）
+
+- 正式版本 v1.7.1 已发布：GitHub Release 为权威正式版（`releases/latest`），Gitee 的 `updates` 分支清单与 GitHub 发行包校验值保持一致。
+- 发布时本机 `github.com:443` 的 git 通道被网络代理拦截（CONNECT 502），SSH 公钥无权限。源码改用 GitHub Git Data API 逐提交重放到 `main`，并用 API 创建 `v1.7.1` 标签与上传发行文件；重放后 GitHub `main` 的文件树与本地 HEAD 完全一致（已校验）。Gitee 的 `main/master`、标签与 `updates` 分支走常规 git push 完成。
+- GitHub Actions 在标签推送后自动构建并发布了正式 Release，其安装包为 Actions 重新编译产物，SHA-256 与本机构建不同。为避免校验失败，`updates` 分支的 `update-manifest.json` 与 `SHA256SUMS.txt` 采用 GitHub 正式 Release 附件的实际校验值，两源清单一致。
+- Gitee 发行版的安装包附件需在 Gitee 网页手动上传，本机 Gitee 凭据不支持附件 API。当前 Gitee 安装包下载返回 404；更新器测速时会自动把该源排到最后，并从 GitHub 主源下载安装，不影响升级。若某用户的网络无法访问 GitHub，则需在 Gitee 补传安装包附件后才能从 Gitee 源更新。
+- 端到端验证：从 1.7.0 能检测到 1.7.1；两源清单均可匿名读取且版本一致；GitHub 安装包支持 Range 探测（HTTP 206），可正常测速与下载。
+
 ## 源码运行
 
 源码模式提供版本检查与 GitHub 下载入口。原地安装只面向发行版目录；源码目录、node_modules 和开发工具不交给用户更新器覆盖。
