@@ -55,6 +55,27 @@ try{
  const restored=copy(recycled);restored.projects[0].docs.push(restored.projects[0].trash.pop().record);await store.save(recycled,restored);assert.deepEqual(workspaceFiles(await store.load()),workspaceFiles(recycleBase));
  console.log('PASS: document and diagram edits merge independently; document recycle/restore removes orphan directories.');
 
+ // 彻底删除：先从数据中移除记录并保存，再由服务端清理残留文件；文档目录（含图片）必须整目录消失。
+ const purgeBase=await store.load(),pid=purgeBase.projects[0].id;
+ const purgeDoc=purgeBase.projects[0].docs[0],purgeTask=purgeBase.projects[0].tasks[0];
+ const purgeDocDir=path.join(store.directory,pid,'docs',purgeDoc.id),purgeTaskFile=path.join(store.directory,pid,'tasks',purgeTask.id+'.json');
+ assert.ok((await fs.stat(purgeDocDir)).isDirectory());assert.ok((await fs.stat(purgeTaskFile)).isFile());
+ // 写入一张图片，模拟文档附件的残留。
+ await fs.mkdir(path.join(purgeDocDir,'Image'),{recursive:true});await fs.writeFile(path.join(purgeDocDir,'Image','x.png'),'fake');
+ // 记录还在时必须拒绝清理。
+ await assert.rejects(store.purgeRecordFile(pid,'docs',purgeDoc.id),e=>e.status===409);
+ const purged=copy(purgeBase);purged.projects[0].docs.shift();purged.projects[0].tasks.shift();
+ await store.save(purgeBase,purged);
+ // 差分保存后普通记录文件已被删；文档目录可能只剩图片。
+ await store.purgeRecordFile(pid,'docs',purgeDoc.id);
+ await store.purgeRecordFile(pid,'tasks',purgeTask.id);
+ await assert.rejects(fs.stat(purgeDocDir),e=>e.code==='ENOENT','彻底删除后文档目录（含图片）应消失');
+ await assert.rejects(fs.stat(purgeTaskFile),e=>e.code==='ENOENT','彻底删除后任务文件应消失');
+ // 幂等：重复清理不报错。
+ await store.purgeRecordFile(pid,'docs',purgeDoc.id);
+ await assert.rejects(store.purgeRecordFile(pid,'docs','../evil'),e=>e.status===400,'非法 ID 必须被拒绝');
+ console.log('PASS: hard-delete purges record files and whole document directories (with images), idempotent and rejects invalid ids.');
+
  const rollbackBase=await store.load(),failed=copy(rollbackBase);failed.projects.push(defaultWorkspace().projects[0]);
  const realApply=store.apply.bind(store);let count=0;store.apply=async(...args)=>{if(++count===3)throw new Error('Simulated disk failure');return realApply(...args);};
  await assert.rejects(store.save(rollbackBase,failed),/Simulated disk failure/);store.apply=realApply;assert.deepEqual(workspaceFiles(await store.load()),workspaceFiles(rollbackBase));

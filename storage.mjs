@@ -104,6 +104,30 @@ export class ProjectStore {
     const doc=await this.object(document);if(doc.id!==docId)throw new StorageError('文档不存在。',404);
     return path.join(directory,'docs',docId,'Image');
   }
+  // 彻底删除一条记录留下的磁盘文件。普通记录是单个 JSON；文档是整个目录（正文、图表源码、图片）。
+  // 只按磁盘事实清理，必须校验对象确已不在项目数据中，且路径没有越过安全红线。
+  async purgeRecordFile(id,type,recordId){
+    if(!safeId(id)||!safeId(recordId)||!collectionNames.includes(type))throw new StorageError('记录参数无效。');
+    const directory=this.getLocation(id),metadata=path.join(directory,'project.json');await this.checkParents(metadata);
+    const project=await this.object(metadata);if(project.id!==id||project.deletedAt)throw new StorageError('项目不存在。',404);
+    // 磁盘上仍存在这条记录时拒绝清理，避免删掉仍在使用的文件。
+    const exists=type==='docs'
+      ? await this.existsDoc(directory,recordId)
+      : await this.existsFile(path.join(directory,type,recordId+'.json'));
+    if(exists)throw new StorageError('这条记录还在项目文件中，未执行清理。',409);
+    const target=type==='docs'?path.join(directory,'docs',recordId):path.join(directory,type,recordId+'.json');
+    await this.checkParents(target);
+    const blocked=this.unsafePurgeTarget(target);if(blocked)throw new StorageError(blocked,409);
+    if(type==='docs')await fs.rm(target,{recursive:true,force:true});
+    else await fs.rm(target,{force:true});
+    await this.prune(path.dirname(target));
+    return {removed:target};
+  }
+  async existsFile(file){try{await this.assertNoSymlink(file);await fs.access(file);return true;}catch(e){if(e.code==='ENOENT'||e.code==='ENOTDIR')return false;throw e;}}
+  async existsDoc(directory,docId){
+    const folder=path.join(directory,'docs',docId);
+    try{await this.assertNoSymlink(folder);const entries=await this.entries(folder);return entries.some(entry=>entry.name==='document.json');}catch(e){if(e.code==='ENOENT'||e.code==='ENOTDIR')return false;throw e;}
+  }
   async writeDocumentImage(id,docId,data){
     const {extension,mime}=detectImage(data),folder=await this.documentImageFolder(id,docId);
     const name=createHash('sha256').update(data).digest('hex')+'.'+extension,file=path.join(folder,name);
