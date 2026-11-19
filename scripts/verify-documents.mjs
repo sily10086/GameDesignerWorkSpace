@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {MarkdownManager} from '@tiptap/markdown';
 import {editorExtensions,attachmentImageURL} from '../editor-entry.js';
 import {defaultWorkspace} from '../dist/project-model.js';
+import {diagramIdsInContent,liveDiagrams,pruneDiagrams} from '../dist/diagram-refs.js';
 const manager=new MarkdownManager({extensions:editorExtensions(),markedOptions:{gfm:true}});
 const source='# 游戏规则\n\n## 输入与反馈\n\n**加粗**、*斜体*、~~废弃~~、`speed = 5` 与 [设计参考](https://example.com/design)。\n\n- 探索\n  - 分支事件\n\n1. 领取委托\n2. 完成投递\n\n- [ ] 输入响应\n- [x] 验收完成\n\n| 属性 | 数值 |\n| --- | --- |\n| 移动速度 | 5 |\n\n> 注意：受击时中断冲刺。\n\n```mermaid\nflowchart LR\n A[开始] --> B[结束]\n```\n\n---\n\n![概念图](https://example.com/concept.png)\n';
 for(const content of [source,...defaultWorkspace().projects[0].docs.map(doc=>doc.content)]){
@@ -19,3 +20,16 @@ assert.equal(manager.serialize(manager.parse(localImage)).trim(),localImage);
 assert.equal(attachmentImageURL('attachments/reference/scene%20one.png','sample-id'),'/api/projects/sample-id/attachments/reference/scene%20one.png');
 assert.equal(attachmentImageURL('attachments/%2e%2e/secret.png','sample-id'),'');
 assert.equal(attachmentImageURL('https://example.com/image.png','sample-id'),'https://example.com/image.png');
+
+// 正文里删掉图表块后，diagrams 数组里对应的残留记录必须被清掉（下拉框不再显示已删图表）。
+const d1={id:'d1',type:'flowchart',title:'关卡主流程'},d2={id:'d2',type:'flowchart',title:'最小循环'},d3={id:'d3',type:'mindmap',title:'中心主题'};
+const doc={content:'# 方案\n\n:::gdws-diagram d1\n:::\n\n正文段落。\n\n:::gdws-diagram d3\n:::\n',diagrams:[d1,d2,d3]};
+assert.deepEqual([...diagramIdsInContent(doc.content)],['d1','d3'],'只从正文引用提取图表 ID');
+assert.deepEqual(liveDiagrams(doc),[d1,d3],'只保留正文仍在引用的图表');
+const removed=pruneDiagrams(doc);
+assert.deepEqual(removed,[d2],'被删掉的图表记录被识别出来');
+assert.deepEqual(doc.diagrams,[d1,d3],'正文已删的图表记录从数组移除');
+assert.deepEqual(pruneDiagrams(doc),[],'再次清理应该是幂等的');
+const empty={content:'没有图表',diagrams:[d1]};
+assert.deepEqual(pruneDiagrams(empty),[d1],'正文没有任何引用时全部清理');
+console.log('PASS: deleted diagram blocks are pruned from the diagram list (no stale entries in picker).');
