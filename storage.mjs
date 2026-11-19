@@ -81,6 +81,17 @@ export class ProjectStore {
   async saveRegistry(){await this.atomic(path.join(this.privateDirectory,'library.json'),json({version:1,projects:this.registry,hiddenLegacy:[...this.suppressedLegacy]}));}
   async detach(id){if(!safeId(id))throw new StorageError('项目 ID 无效。');this.registry=this.registry.filter(item=>item.id!==id);this.mounts.delete(id);this.suppressedLegacy.add(id);await this.saveRegistry();return {message:'仅移除了本机项目关联，项目文件和仓库保持不动。'};}
   getLocation(id){if(!safeId(id))throw new StorageError('项目 ID 无效。');return this.mounts.get(id)||path.join(this.directory,id);}
+  async attachment(id,relative){
+    if(!safeId(id)||typeof relative!=='string'||relative.split('/').some(part=>!part||part==='.'||part==='..'||/[\\\x00-\x1f:]/.test(part)))throw new StorageError('附件路径无效。',400);
+    const directory=this.getLocation(id);const project=await this.object(path.join(directory,'project.json'));
+    if(project.id!==id||project.deletedAt)throw new StorageError('项目不存在。',404);
+    const root=path.join(directory,'attachments'),file=path.resolve(root,...relative.split('/'));
+    if(!file.startsWith(root+path.sep))throw new StorageError('附件路径无效。',403);
+    await this.checkParents(file);const stat=await fs.stat(file);
+    if(!stat.isFile())throw new StorageError('附件不存在。',404);
+    if(stat.size>MAX_BYTES)throw new StorageError('附件超过 50 MB。',413);
+    return {file,data:await fs.readFile(file)};
+  }
   async register(directory,{replace=false}={}){directory=path.resolve(directory);const p=await this.readProjectAt(directory);const prior=this.registry.find(q=>q.id===p.id);if(prior&&path.resolve(prior.directory)!==directory&&!replace)throw new StorageError('此项目 ID 已关联其他目录，请先移除旧关联。',409);this.mounts.set(p.id,directory);if(!prior)this.registry.push({id:p.id,name:p.name,directory});else{prior.name=p.name;prior.directory=directory;}await this.saveRegistry();return p;}
   async writeFormat(id){const directory=this.getLocation(id);const file=path.join(directory,'project-format.json');try{await fs.access(file);}catch(e){if(e.code!=='ENOENT')throw e;await this.atomic(file,json({format:'GameDesignerWorkerSpace.Project',version:1,projectId:id}));}}
   async separate(id){if(this.mounts.has(id))return this.getLocation(id);if(!this.externalRoot)throw new StorageError('未配置独立项目目录。');const source=this.getLocation(id),p=await this.readProjectAt(source,id),target=path.resolve(this.externalRoot,id);if(!target.startsWith(this.externalRoot+path.sep))throw new StorageError('项目目录无效。');await fs.mkdir(this.externalRoot,{recursive:true});try{await fs.access(target);throw new StorageError('目标项目目录已存在，请关联已有目录。',409);}catch(e){if(e.code!=='ENOENT')throw e;}await fs.cp(source,target,{recursive:true,errorOnExist:true,force:false});await this.register(target);await this.writeFormat(id);return target;}

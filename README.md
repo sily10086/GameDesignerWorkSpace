@@ -26,7 +26,7 @@ Windows x64，Node 24.15.0：运行 `npm ci`、`npm run prepare:runtime`、`npm 
 
 输入 `/` 快速插入标题、列表、待办、表格、引用、代码块、分割线、图片链接、思维导图或流程图。选中文字设置格式，标题生成大纲；支持表格增删行列、查找、阅读模式、撤销/重做与 Markdown 源码。正文自动写入项目中的 Markdown，图表保存为 Mermaid，继续通过 Git/SVN 协作。
 
-编辑器与依赖随安装包提供，离线可用；图片链接需要能访问对应地址。文档模块参考飞书的常用写作交互，详见 [文档编辑功能与参考](DOCUMENT_EDITOR_PLAN.md)。
+编辑器与依赖随安装包提供，离线可用。项目内图片放在项目根目录 `attachments/`，Markdown 使用 `![说明](attachments/reference.png)` 相对路径；随项目一起复制或通过 Git/SVN 同步。支持 PNG/JPEG/WebP/GIF/AVIF，单张不超过 50 MB。外部图片链接需要能访问对应地址。文档模块参考飞书的常用写作交互，详见 [文档编辑功能与参考](DOCUMENT_EDITOR_PLAN.md)。
 
 ## 项目库与仓库
 

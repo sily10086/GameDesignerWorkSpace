@@ -24,6 +24,12 @@ export async function createServer({root=appRoot,dataDirectory=process.env.GDWS_
   if(req.headers.origin&&req.headers.origin!==`http://${host}`)throw new StorageError('不允许跨站写入项目文件。',403);
   const pathname=decodeURIComponent(new URL(req.url,'http://'+host).pathname);
   if(pathname.startsWith('/api/')){
+   const attachmentRoute=pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]+)\/attachments\/(.+)$/);
+   if(attachmentRoute&&(req.method==='GET'||req.method==='HEAD')){
+    const imageTypes={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif'};
+    const mime=imageTypes[path.extname(attachmentRoute[2]).toLowerCase()];if(!mime)throw new StorageError('不支持此附件类型。',415);
+    try{const attachment=await store.serialize(()=>store.attachment(attachmentRoute[1],attachmentRoute[2]));res.writeHead(200,{'Content-Type':mime,'Content-Length':attachment.data.length,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'same-origin'});return res.end(req.method==='HEAD'?undefined:attachment.data);}catch(error){if(error.code==='ENOENT'||error.code==='ENOTDIR')throw new StorageError('附件不存在。',404);throw error;}
+   }
    if(pathname==='/api/app-update'&&req.method==='GET'){try{return send(res,200,await checkForUpdates());}catch(error){throw new StorageError(error.message,502);}}
    if(pathname==='/api/app-update/open'&&req.method==='POST'){await readBody(req);try{return send(res,200,await openUpdater());}catch(error){throw new StorageError(error.message,409);}}
    if(pathname==='/api/health'&&req.method==='GET')return send(res,200,{app:'GameDesignerWorkerSpace',directory:store.directory,root:path.resolve(root),pid:process.pid});

@@ -1,4 +1,4 @@
-import {Editor} from '@tiptap/core';
+import {Editor,mergeAttributes} from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import {Markdown} from '@tiptap/markdown';
 import {TableKit,Table} from '@tiptap/extension-table';
@@ -59,15 +59,21 @@ export function composerMarkup(){return `
   <div class="rich-table-tools" hidden><span>表格</span>${tool('addRowAfter','下方加一行','＋ 行')}${tool('addColumnAfter','右侧加一列','＋ 列')}${tool('deleteRow','删除当前行','− 行')}${tool('deleteColumn','删除当前列','− 列')}${tool('deleteTable','删除整个表格','删除表格')}</div>
   <div class="rich-writing-hint"><span id="rich-mode-hint">输入 / 快速插入 · 选中文字设置格式</span><span id="rich-word-count"></span></div>`;}
 
-export function editorExtensions(){return [StarterKit.configure({link:{openOnClick:false,autolink:true,protocols:['http','https','mailto']}}),TableKit.configure({table:false}),MarkdownTable.configure({resizable:false}),TaskList,TaskItem.configure({nested:true}),Image.configure({allowBase64:false}),Markdown.configure({markedOptions:{gfm:true}}),Placeholder.configure({placeholder:'写下你的设计，或输入 / 插入内容…'})];}
+export function attachmentImageURL(src,projectId){
+  if(!projectId||!/^attachments\//.test(src)||!/^[A-Za-z0-9_-]+$/.test(projectId))return src;
+  const parts=src.slice(12).split('/').map(part=>{try{return decodeURIComponent(part);}catch{return '';}});
+  if(parts.some(part=>!part||part==='.'||part==='..'||/[\\\x00-\x1f]/.test(part)))return '';
+  return '/api/projects/'+projectId+'/attachments/'+parts.map(encodeURIComponent).join('/');
+}
+export function editorExtensions({projectId}={}){const ProjectImage=Image.extend({renderHTML({HTMLAttributes}){return ['img',mergeAttributes(this.options.HTMLAttributes,HTMLAttributes,{src:attachmentImageURL(HTMLAttributes.src||'',projectId)})];}});return [StarterKit.configure({link:{openOnClick:false,autolink:true,protocols:['http','https','mailto']}}),TableKit.configure({table:false}),MarkdownTable.configure({resizable:false}),TaskList,TaskItem.configure({nested:true}),ProjectImage.configure({allowBase64:false}),Markdown.configure({markedOptions:{gfm:true}}),Placeholder.configure({placeholder:'写下你的设计，或输入 / 插入内容…'})];}
 
-export function mountComposer(root,{content,onChange,onDiagram,onError=console.error}){
+export function mountComposer(root,{content,projectId,onChange,onDiagram,onError=console.error}){
   const controller=new AbortController(),listen=(node,event,callback)=>node.addEventListener(event,callback,{signal:controller.signal});
   const $=selector=>root.querySelector(selector),menu=$('.rich-insert-menu'),bubble=$('.rich-bubble'),source=$('#doc-content');
   let sourceMode=false,readOnly=false,slash=null,menuIndex=0,menuItems=insertions,findIndex=-1,findMatches=[],frame=0,original=content,linkKind='link';
   const rich=new Editor({
     element:$('#rich-editor'),
-    extensions:editorExtensions(),
+    extensions:editorExtensions({projectId}),
     content,contentType:'markdown',
     editorProps:{attributes:{role:'textbox','aria-label':'文档正文','aria-multiline':'true',spellcheck:'false'},handleKeyDown:(_view,event)=>handleKey(event)},
     onUpdate:()=>{try{original=rich.getMarkdown();onChange(original);update();updateSlash();}catch(error){onError(error);}},
