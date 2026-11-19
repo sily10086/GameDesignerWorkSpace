@@ -33,6 +33,10 @@ body.document-fullscreen #app{visibility:hidden}
 .document-title-bar{padding:29px 34px 17px;flex-shrink:0}
 .document-type{font-size:9px;letter-spacing:1.6px;color:#95a198;margin-bottom:15px}
 .document-type span{letter-spacing:0;margin-left:10px;padding:3px 7px;border:1px solid #e5ebe5;border-radius:4px;color:#8a9a8d}
+.document-type .doc-version{float:right;display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid #e5ebe5;border-radius:4px;letter-spacing:0;color:#9aa79b}
+.document-type .doc-version b{font-weight:400}
+.document-type .doc-version input{width:58px;border:0;background:transparent;outline:none;font-size:10px;letter-spacing:0;color:#5c7d64;padding:0}
+.document-type .doc-version input::placeholder{color:#b6c0b4}
 .document-title-bar .doc-edit-title{font-size:26px;font-weight:650;letter-spacing:-.6px;line-height:1.5;width:100%;min-width:0;border:0;background:transparent;color:#243d30;padding:0 0 4px;outline:none}
 .document-meta{display:flex;flex-wrap:wrap;gap:16px;color:#a3ada5;font-size:10px;margin-top:8px;line-height:1.8}
 .document-meta .saved-time{margin:0;color:#7f9c8b;display:flex;gap:6px;align-items:center}

@@ -27,6 +27,11 @@ try{
  assert.deepEqual(workspaceFiles(await store.load()),workspaceFiles(original));
  const restarted=new ProjectStore(root);await restarted.init();assert.deepEqual(workspaceFiles(await restarted.load()),workspaceFiles(original));
  assert.equal((await store.save(original,original)).changedFiles,0);
+ // 文档版本编号必须跟着 document.json 一起落盘和读回。
+ assert.equal(JSON.parse(await fs.readFile(path.join(docPath,'document.json'),'utf8')).version,d.version||'', 'document.json 要写入版本编号');
+ const versionBase=await store.load(),versioned=copy(versionBase);versioned.projects[0].docs[0].version='V0.2';
+ await store.save(versionBase,versioned);
+ assert.equal((await store.load()).projects[0].docs[0].version,'V0.2','文档版本编号必须能往返保存');
  console.log('PASS: Project files, Markdown/Mermaid round trip, restart persistence, unchanged files not rewritten.');
 
  const base=await store.load(),a=copy(base),b=copy(base);
