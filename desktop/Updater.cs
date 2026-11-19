@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Security.Cryptography;
 using System.Collections.Generic;
+using System.Linq;
 using System.Web.Script.Serialization;
 
 class UpdateEngine {
@@ -35,6 +36,28 @@ class UpdateEngine {
   if(asset.TryGetValue("mirrors",out value)){var mirrors=value as object[];if(mirrors==null)throw new Exception("镜像安装包列表无效。");foreach(object item in mirrors){string url=Convert.ToString(item),prefix=GiteePrefix+"download/v"+version+"/";if(!url.StartsWith(prefix,StringComparison.Ordinal)||Uri.UnescapeDataString(url.Substring(prefix.Length))!=Text(asset,"name"))throw new Exception("镜像安装包地址无效。");if(!urls.Contains(url))urls.Add(url);}}
   if(preferred=="gitee")urls.Reverse();return urls;
  }
+ // 下载前实测各来源的安装包下载速度：用带 Range 的小段请求取 ProbeBytes 字节，按实际耗时算字节/秒。
+ // 服务器忽略 Range 返回整包时，读完 ProbeBytes 就停止并释放连接，不会把整包下下来。超时或异常视为不可用（返回 0）。
+ public const int ProbeBytes=256*1024,ProbeTimeoutMs=8000;
+ public static double ProbeSpeed(string url){
+  try{
+   var request=(HttpWebRequest)WebRequest.Create(url);request.Timeout=ProbeTimeoutMs;request.ReadWriteTimeout=ProbeTimeoutMs;
+   request.UserAgent="GameDesignerWorkerSpace-Updater";request.Headers["Accept"]="application/octet-stream";request.AddRange(0,ProbeBytes-1);
+   var watch=Stopwatch.StartNew();int total=0;
+   using(var response=(HttpWebResponse)request.GetResponse())using(var stream=response.GetResponseStream()){
+    var buffer=new byte[8192];int read;
+    while(total<ProbeBytes&&(read=stream.Read(buffer,0,(int)Math.Min(buffer.Length,ProbeBytes-total)))>0)total+=read;
+   }
+   watch.Stop();
+   return total<=0?0:total/Math.Max(0.05,watch.Elapsed.TotalSeconds);
+  }catch{return 0;}
+ }
+ // 按实测速度从快到慢排列下载源；速度为 0（探测失败或超时）的源保持原有相对次序作为备用，避免探测抖动改变清单竞速结果。
+ public static List<string> RankBySpeed(List<string> urls,Dictionary<string,double> speed){
+  return urls.Select((url,index)=>new{url,index,rate=speed.ContainsKey(url)?speed[url]:0})
+   .OrderByDescending(x=>x.rate>0).ThenByDescending(x=>x.rate).ThenBy(x=>x.index)
+   .Select(x=>x.url).ToList();
+ }
  public static async Task<UpdateCandidate> Find(string current){
   var tasks=new List<Task<UpdateCandidate>>();foreach(string source in new[]{"github","gitee"})tasks.Add(ReadManifest(source));
   UpdateCandidate best=null;while(tasks.Count>0){var task=await Task.WhenAny(tasks);tasks.Remove(task);try{var result=await task;if(HasNewer(current,result.Version))return result;if(best==null||HasNewer(best.Version,result.Version))best=result;}catch{}}
@@ -60,8 +83,11 @@ class UpdateEngine {
  public static void SelfTest(string report){
   string folder=Path.Combine(Path.GetTempPath(),"gdws-updater-check-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);
   try{if(!HasNewer("1.4.0","1.5.0")||HasNewer("1.5.0","1.5.0")||HasNewer("1.5.0","1.4.0"))throw new Exception("Version comparison failed");foreach(string path in new[]{"Project/a.json","App/../Project/a.json","App/Project/a.json","Data/settings.json","App/.git/config","App/project.json"})if(PayloadPolicy.Allowed(path))throw new Exception("Protected project path accepted");if(!PayloadPolicy.Allowed("App/dist/app.js"))throw new Exception("Application path rejected");
+   var urls=new List<string>{Prefix+"download/v1.5.0/a.exe",GiteePrefix+"download/v1.5.0/a.exe"};
+   var ranked=RankBySpeed(urls,new Dictionary<string,double>{{urls[0],100},{urls[1],900}});if(ranked[0]!=urls[1]||ranked[1]!=urls[0])throw new Exception("Speed ranking failed");
+   var failed=RankBySpeed(urls,new Dictionary<string,double>{{urls[0],100}});if(failed[0]!=urls[0]||failed[1]!=urls[1])throw new Exception("Speed ranking fallback failed");
    string file=Path.Combine(folder,"package.exe");File.WriteAllText(file,"offline checksum fixture");var asset=new Dictionary<string,object>{{"name","GameDesignerWorkerSpace-Setup-1.5.0-x64.exe"},{"url",Prefix+"download/v1.5.0/GameDesignerWorkerSpace-Setup-1.5.0-x64.exe"},{"size",new FileInfo(file).Length},{"sha256",Hash(file)}};
-   var manifest=new Dictionary<string,object>{{"schema",1},{"application","GameDesignerWorkerSpace"},{"repository",Repository},{"version","1.5.0"},{"platform","win32-x64"},{"managedRoots",PayloadPolicy.Managed},{"protectedRoots",PayloadPolicy.Protected},{"installer",asset}};Installer(Object(Json.Serialize(manifest)),"1.5.0");Verify(file,asset);File.AppendAllText(file,"changed");bool rejected=false;try{Verify(file,asset);}catch{rejected=true;}if(!rejected)throw new Exception("Modified package accepted");File.WriteAllText(report,Json.Serialize(new{ok=true,version=true,checksum=true,projectProtection=true}),new UTF8Encoding(false));
+   var manifest=new Dictionary<string,object>{{"schema",1},{"application","GameDesignerWorkerSpace"},{"repository",Repository},{"version","1.5.0"},{"platform","win32-x64"},{"managedRoots",PayloadPolicy.Managed},{"protectedRoots",PayloadPolicy.Protected},{"installer",asset}};Installer(Object(Json.Serialize(manifest)),"1.5.0");Verify(file,asset);File.AppendAllText(file,"changed");bool rejected=false;try{Verify(file,asset);}catch{rejected=true;}if(!rejected)throw new Exception("Modified package accepted");File.WriteAllText(report,Json.Serialize(new{ok=true,version=true,checksum=true,projectProtection=true,speedRanking=true}),new UTF8Encoding(false));
   }finally{Directory.Delete(folder,true);}
  }
 }
@@ -73,7 +99,14 @@ class UpdateForm:Form {
   Controls.Add(new Label(){Text="工作台更新",Left=27,Top=23,Width=540,Height=35,Font=new Font("Microsoft YaHei UI",17F,FontStyle.Bold),ForeColor=Color.FromArgb(42,91,65)});status=new Label(){Text="正在同时检查 GitHub / Gitee…",Left=30,Top=72,Width=550,Height=42};Controls.Add(status);notes=new TextBox(){Left=30,Top=120,Width=550,Height=175,Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,BackColor=Color.White,BorderStyle=BorderStyle.FixedSingle};Controls.Add(notes);Controls.Add(new Label(){Text="只更新程序、Runtime 和说明。保留 Project、Data、Logs 与独立项目。",Left=30,Top=309,Width=550,Height=25,ForeColor=Color.FromArgb(115,139,98)});progress=new ProgressBar(){Left=30,Top=344,Width=550,Height=10};Controls.Add(progress);action=new Button(){Text="检查更新",Left=415,Top=373,Width=165,Height=34,Enabled=false};action.Click+=Perform;Controls.Add(action);var releases=new LinkLabel(){Text="查看发行版本",Left=30,Top=383,Width=250,Height=25};releases.LinkClicked+=(s,e)=>Process.Start(new ProcessStartInfo(UpdateEngine.Prefix){UseShellExecute=true});Controls.Add(releases);Shown+=async(s,e)=>await Check();FormClosing+=(s,e)=>{if(busy){e.Cancel=true;status.Text="正在下载与校验，请稍候。";}};
  }
  async Task Check(){busy=true;action.Enabled=false;asset=null;downloaded=null;try{var found=await UpdateEngine.Find(current);latest=found.Version;source=found.Source;asset=found.Asset;notes.Text=found.Notes.Replace("\n",Environment.NewLine);if(!UpdateEngine.HasNewer(current,latest)){asset=null;status.Text="当前 v"+current+"，已是最新正式版本。";action.Text="重新检查";return;}status.Text="发现 v"+latest+"，正在自动下载…";action.Text="下载更新";}catch(Exception error){status.Text="更新检查未完成";notes.Text=error.Message;action.Text="重新检查";}finally{busy=false;action.Enabled=true;}if(asset!=null)Perform(null,EventArgs.Empty);}
- async Task FetchMirror(string partial){Exception last=null;foreach(string url in UpdateEngine.URLs(asset,latest,source)){try{if(File.Exists(partial))File.Delete(partial);string provider=url.StartsWith(UpdateEngine.GiteePrefix)?"Gitee":"GitHub";using(var client=UpdateEngine.Client()){DateTime changed=DateTime.UtcNow;long received=0;client.Headers["Accept"]="application/octet-stream";client.DownloadProgressChanged+=(s,e)=>{if(e.BytesReceived>received){received=e.BytesReceived;changed=DateTime.UtcNow;}progress.Value=Math.Min(100,e.ProgressPercentage);status.Text="正在从 "+provider+" 下载 v"+latest+"… "+progress.Value+"%";};var task=client.DownloadFileTaskAsync(url,partial);while(!task.IsCompleted){await Task.WhenAny(task,Task.Delay(1000));if(DateTime.UtcNow-changed>TimeSpan.FromSeconds(15)){client.CancelAsync();throw new Exception(provider+" 下载暂时无响应。");}}await task;}await Task.Run(()=>UpdateEngine.Verify(partial,asset));return;}catch(Exception error){last=error;if(File.Exists(partial))File.Delete(partial);status.Text="正在切换备用下载来源…";}}throw new Exception("下载来源均未通过校验，未执行安装。"+(last==null?"":last.Message));}
+ async Task FetchMirror(string partial){Exception last=null;var urls=UpdateEngine.URLs(asset,latest,source);
+  if(urls.Count>1){status.Text="正在检测 GitHub / Gitee 下载速度…";progress.Value=0;var probes=new Dictionary<string,Task<double>>();
+   foreach(var url in urls){var target=url;probes[target]=Task.Run(()=>UpdateEngine.ProbeSpeed(target));}
+   await Task.WhenAll(probes.Values);var speed=new Dictionary<string,double>();foreach(var p in probes)speed[p.Key]=p.Value.Result;
+   urls=UpdateEngine.RankBySpeed(urls,speed);string detail=string.Join("，",probes.Select(p=>{string name=p.Key.StartsWith(UpdateEngine.GiteePrefix)?"Gitee":"GitHub";return name+" "+(speed[p.Key]>0?(speed[p.Key]/1024/1024).ToString("0.0")+" MB/s":"暂不可用");}));
+   notes.Text="来源测速："+detail+Environment.NewLine+(speed[urls[0]]>0?"已选用更快的来源。":"测速未成功，按默认顺序尝试。")+Environment.NewLine+notes.Text;
+  }
+  foreach(string url in urls){try{if(File.Exists(partial))File.Delete(partial);string provider=url.StartsWith(UpdateEngine.GiteePrefix)?"Gitee":"GitHub";using(var client=UpdateEngine.Client()){DateTime changed=DateTime.UtcNow;long received=0;client.Headers["Accept"]="application/octet-stream";client.DownloadProgressChanged+=(s,e)=>{if(e.BytesReceived>received){received=e.BytesReceived;changed=DateTime.UtcNow;}progress.Value=Math.Min(100,e.ProgressPercentage);status.Text="正在从 "+provider+" 下载 v"+latest+"… "+progress.Value+"%";};var task=client.DownloadFileTaskAsync(url,partial);while(!task.IsCompleted){await Task.WhenAny(task,Task.Delay(1000));if(DateTime.UtcNow-changed>TimeSpan.FromSeconds(15)){client.CancelAsync();throw new Exception(provider+" 下载暂时无响应。");}}await task;}await Task.Run(()=>UpdateEngine.Verify(partial,asset));return;}catch(Exception error){last=error;if(File.Exists(partial))File.Delete(partial);status.Text="正在切换备用下载来源…";}}throw new Exception("下载来源均未通过校验，未执行安装。"+(last==null?"":last.Message));}
  async void Perform(object sender,EventArgs args){
   if(asset==null){await Check();return;}
   if(downloaded!=null){if(UpdateEngine.Running(root)){MessageBox.Show("请先保存网页中的内容，并从系统托盘选择「退出工作台服务」，再点击安装。","安装更新",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}try{UpdateEngine.Verify(downloaded,asset);Process.Start(new ProcessStartInfo(downloaded,"/dir=\""+root+"\""){UseShellExecute=true});Close();}catch(Exception error){MessageBox.Show(error.Message,"更新未完成");}return;}
