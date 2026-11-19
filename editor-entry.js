@@ -81,23 +81,57 @@ export function attachmentImageURL(src,projectId,docId){
 }
 const uploadPlaceholderKey=new PluginKey('document-image-upload');
 const ImageUploads=Extension.create({name:'documentImageUploads',addProseMirrorPlugins(){return [new Plugin({key:uploadPlaceholderKey,state:{init:()=>DecorationSet.empty,apply(tr,previous){let set=previous.map(tr.mapping,tr.doc);const action=tr.getMeta(uploadPlaceholderKey);if(action?.add)set=set.add(tr.doc,[Decoration.widget(action.pos,()=>{const el=document.createElement('span');el.className='image-upload-placeholder';el.textContent='正在插入图片…';return el;},{id:action.id,side:-1})]);if(action?.remove)set=set.remove(set.find(undefined,undefined,item=>item.id===action.id));return set;}},props:{decorations:state=>uploadPlaceholderKey.getState(state)}})];}});
-export function editorExtensions({projectId,docId,...diagramOptions}={}){const ProjectImage=Image.extend({renderHTML({HTMLAttributes}){return ['img',mergeAttributes(this.options.HTMLAttributes,HTMLAttributes,{src:attachmentImageURL(HTMLAttributes.src||'',projectId,docId)})];}});return [StarterKit.configure({link:{openOnClick:false,autolink:true,protocols:['http','https','mailto']}}),TableKit.configure({table:false}),MarkdownTable.configure({resizable:false}),TaskList,TaskItem.configure({nested:true}),ProjectImage.configure({allowBase64:false}),ImageUploads,documentDiagramExtension(diagramOptions),Markdown.configure({markedOptions:{gfm:true}}),Placeholder.configure({placeholder:'写下你的设计，或输入 / 插入内容…'})];}
+export function editorExtensions({projectId,docId,...diagramOptions}={}){const ProjectImage=Image.extend({renderHTML({HTMLAttributes}){return ['img',mergeAttributes(this.options.HTMLAttributes,HTMLAttributes,{src:attachmentImageURL(HTMLAttributes.src||'',projectId,docId)})];}});return [StarterKit.configure({link:{openOnClick:false,autolink:true,protocols:['http','https','mailto']}}),TableKit.configure({table:false}),MarkdownTable.configure({resizable:true,lastColumnResizable:true,handleWidth:6,cellMinWidth:45}),TaskList,TaskItem.configure({nested:true}),ProjectImage.configure({allowBase64:false}),ImageUploads,documentDiagramExtension(diagramOptions),Markdown.configure({markedOptions:{gfm:true}}),Placeholder.configure({placeholder:'写下你的设计，或输入 / 插入内容…'})];}
 
-export function mountComposer(root,{content,projectId,docId,uploadImage,onChange,onDiagram,resolveDiagram,onDiagramChange,onOpenDiagram,onRenderFlow,onError=console.error}){
+// 列宽无法在 GFM Markdown 里表达，改存到文档元数据，打开时回填到表格单元格。
+function collectTableWidths(doc){
+  const result=[];
+  doc.descendants(node=>{
+    if(node.type.name!=='table')return;
+    const first=node.firstChild;if(!first)return;
+    const widths=[];
+    first.forEach(cell=>{const cw=cell.attrs.colwidth;widths.push(cw&&cw[0]?cw[0]:0);});
+    result.push(widths);
+  });
+  return result;
+}
+function applyTableWidths(editor,widths){
+  if(!widths||!widths.length||!editor||editor.isDestroyed)return;
+  const tr=editor.state.tr;let tableIndex=0;
+  editor.state.doc.descendants((node,pos)=>{
+    if(node.type.name!=='table')return;
+    const w=widths[tableIndex++];if(!w||!w.length)return;
+    node.forEach((row,rowOffset)=>{
+      let col=0;
+      row.forEach((cell,cellOffset)=>{
+        const span=cell.attrs.colspan||1;
+        const cw=Array.isArray(cell.attrs.colwidth)?cell.attrs.colwidth.slice():new Array(span).fill(0);
+        if(w[col])cw[0]=w[col];
+        if(cw.some(v=>v))tr.setNodeMarkup(pos+1+rowOffset+1+cellOffset,undefined,{...cell.attrs,colwidth:cw});
+        col+=span;
+      });
+    });
+  });
+  if(tr.docChanged)editor.view.dispatch(tr);
+}
+
+export function mountComposer(root,{content,projectId,docId,tableWidths=[],onTableWidths=()=>{},uploadImage,onChange,onDiagram,resolveDiagram,onDiagramChange,onOpenDiagram,onRenderFlow,onError=console.error}){
   const controller=new AbortController(),listen=(node,event,callback)=>node.addEventListener(event,callback,{signal:controller.signal});
   const $=selector=>root.querySelector(selector),menu=$('.rich-insert-menu'),bubble=$('.rich-bubble'),source=$('#doc-content');
   let sourceMode=false,readOnly=false,slash=null,menuIndex=0,menuItems=insertions,findIndex=-1,findMatches=[],frame=0,original=content,linkKind='link';
-  const uploads=new Set(),blockViews=new Set();let destroyed=false;
+  const uploads=new Set(),blockViews=new Set();let destroyed=false;let currentWidths=tableWidths;
+  const widthsChanged=()=>{const next=collectTableWidths(rich.state.doc);if(JSON.stringify(next)!==JSON.stringify(currentWidths)){currentWidths=next;onTableWidths(next);}};
   const imageFiles=transfer=>[...(transfer?.files||[])].filter(file=>file.type.startsWith('image/'));
   const rich=new Editor({
     element:$('#rich-editor'),
     extensions:editorExtensions({projectId,docId,resolveDiagram,onDiagramChange,onOpenDiagram,onRenderFlow,onError,onBlockView:(view,add)=>add?blockViews.add(view):blockViews.delete(view)}),
     content,contentType:'markdown',
     editorProps:{attributes:{role:'textbox','aria-label':'文档正文','aria-multiline':'true',spellcheck:'false'},handleKeyDown:(_view,event)=>handleKey(event),handlePaste:(_view,event)=>{const files=imageFiles(event.clipboardData);if(!files.length||sourceMode||readOnly)return false;event.preventDefault();queueImages(files);return true;},handleDrop:(view,event,moved)=>{const files=imageFiles(event.dataTransfer);if(moved||!files.length||sourceMode||readOnly)return false;event.preventDefault();queueImages(files,view.posAtCoords({left:event.clientX,top:event.clientY})?.pos);return true;}},
-    onUpdate:()=>{try{original=rich.getMarkdown();onChange(original);update();updateSlash();}catch(error){onError(error);}},
+    onUpdate:()=>{try{original=rich.getMarkdown();onChange(original);widthsChanged();update();updateSlash();}catch(error){onError(error);}},
     onSelectionUpdate:()=>{update();updateSlash();},
   });
   source.value=content;
+  applyTableWidths(rich,tableWidths);
   function queueImages(files,position=rich.state.selection.from){
     if(!files.length||sourceMode||readOnly)return;
     const id=crypto.randomUUID();rich.view.dispatch(rich.state.tr.setMeta(uploadPlaceholderKey,{add:true,id,pos:position}));
@@ -155,7 +189,7 @@ export function mountComposer(root,{content,projectId,docId,uploadImage,onChange
     if(uploads.size&&['source','read'].includes(name)){onError(new Error('图片正在插入，请稍候。'));return;}
     if(name==='source'){
       sourceMode=!sourceMode;hideMenu();bubble.hidden=true;$('.rich-link-form').hidden=true;
-      if(sourceMode){source.value=original;}else{rich.commands.setContent(source.value,{contentType:'markdown',emitUpdate:false});}
+      if(sourceMode){source.value=original;}else{rich.commands.setContent(source.value,{contentType:'markdown',emitUpdate:false});applyTableWidths(rich,currentWidths);}
       $('#rich-editor').hidden=sourceMode;source.hidden=!sourceMode;$('.rich-outline').hidden=true;$('.rich-table-tools').hidden=true;
       source.readOnly=readOnly;$('#rich-mode-hint').textContent=sourceMode?'Markdown 源码 · 自动保存到项目':'输入 / 快速插入 · 选中文字设置格式';update();return;
     }

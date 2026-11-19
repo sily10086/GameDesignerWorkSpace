@@ -32,6 +32,12 @@ try{
  const versionBase=await store.load(),versioned=copy(versionBase);versioned.projects[0].docs[0].version='V0.2';
  await store.save(versionBase,versioned);
  assert.equal((await store.load()).projects[0].docs[0].version,'V0.2','文档版本编号必须能往返保存');
+ // 表格列宽无法写进 GFM Markdown，必须存进 document.json 元数据并往返保留。
+ const widthBase=await store.load(),widthDoc=copy(widthBase);widthDoc.projects[0].docs[0].tableWidths=[[200,400,120],[90,310]];
+ await store.save(widthBase,widthDoc);
+ assert.deepEqual(JSON.parse(await fs.readFile(path.join(docPath,'document.json'),'utf8')).tableWidths||[],widthDoc.projects[0].docs[0].tableWidths,'document.json 要写入表格列宽');
+ const widthBack=await new ProjectStore(root).load();
+ assert.deepEqual(widthBack.projects[0].docs[0].tableWidths,[[200,400,120],[90,310]],'表格列宽必须在重启后完整读回');
  console.log('PASS: Project files, Markdown/Mermaid round trip, restart persistence, unchanged files not rewritten.');
 
  const base=await store.load(),a=copy(base),b=copy(base);

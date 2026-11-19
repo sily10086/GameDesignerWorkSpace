@@ -97,11 +97,19 @@ body.document-fullscreen #app{visibility:hidden}
 .rich-editor .tiptap table{border-collapse:collapse;width:100%;table-layout:fixed;margin:18px 0;font-size:12px}
 /* 表格边缘快捷加行/加列按钮：贴在表格右上与左下，点击直接增列/增行 */
 .rich-editor .tiptap .tableWrapper{position:relative}
-.rich-editor .gd-table-add{position:absolute;width:20px;height:20px;padding:0;line-height:18px;text-align:center;font-size:14px;cursor:pointer;color:#3f6e42;background:#e8f3e6;border:1px solid #9dbb8f;border-radius:4px;z-index:3;user-select:none}
-.rich-editor .gd-table-add:hover{background:#cfe6c9;border-color:#6f9c63}
-.rich-editor .gd-table-add:active{background:#b9d9ae}
-.rich-editor .gd-table-add.gd-add-col{right:-11px;top:-11px}
-.rich-editor .gd-table-add.gd-add-row{left:-11px;bottom:-11px}
+/* 列宽拖动分割线：鼠标靠近某列右边缘时，插件插入的蓝色竖线；拖动时单元格淡蓝高亮 */
+.rich-editor .tiptap .column-resize-handle{position:absolute;right:-3px;top:0;bottom:0;width:6px;background:#3370ff;z-index:5;pointer-events:none}
+.rich-editor .tiptap.resize-cursor,.rich-editor .tiptap.resize-cursor *{cursor:col-resize!important}
+.rich-editor .tiptap .column-resize-dragging{background:#eaf1ff}
+.rich-editor.is-reading .tiptap .column-resize-handle{display:none}
+/* 飞书式悬浮加号：贴在各行右侧 / 各列底部，平时隐藏，鼠标移入表格才浮现 */
+.rich-editor .gd-table-add{position:absolute;width:18px;height:18px;padding:0;line-height:16px;text-align:center;font-size:15px;cursor:pointer;color:#2f6feb;background:#fff;border:1px solid #c9d9f5;border-radius:5px;z-index:6;user-select:none;opacity:0;transition:opacity .12s,background .12s,color .12s;box-shadow:0 1px 3px #1f3a6a1a}
+.rich-editor .tableWrapper:hover .gd-table-add,.rich-editor .gd-table-add:focus-visible{opacity:1}
+.rich-editor .gd-table-add:hover{background:#2f6feb;color:#fff;border-color:#2f6feb}
+.rich-editor .gd-table-add:active{background:#1c5bd4}
+.rich-editor .gd-table-add.gd-add-col{bottom:-10px}
+.rich-editor .gd-table-add.gd-add-row{right:-10px}
+.rich-editor .tableWrapper{padding:0 12px 12px 0;margin-bottom:6px}
 .rich-editor.is-reading .gd-table-add{display:none}
 .rich-editor .tiptap td,.rich-editor .tiptap th{border:1px solid #dfe7dc;padding:8px 10px;min-width:45px;vertical-align:top;position:relative;font-weight:400}
 .rich-editor .tiptap th{background:#f0f5ed;font-weight:600}
@@ -156,7 +164,8 @@ body.document-fullscreen #app{visibility:hidden}
 .document-diagram-caption button,.mindmap-tools button,.mindmap-tools select{border:1px solid #dce3e8;border-radius:5px;padding:6px 9px;background:#fff;color:#34414f;font-size:13px;line-height:1.4;cursor:pointer;white-space:nowrap}
 .document-diagram-caption button:hover,.mindmap-tools button:hover{background:#edf4fa}
 .document-diagram-caption .diagram-advanced{color:#7c8996;font-size:12px}
-.visual-mindmap{height:420px;width:100%;background:#fff;position:relative;overflow:hidden;font-family:inherit;outline:none}
+.visual-mindmap{min-height:260px;height:260px;width:100%;background:#fff;position:relative;overflow:hidden;font-family:inherit;outline:none}
+.document-diagram-block .visual-mindmap{height:auto}
 .visual-mindmap:focus-visible{outline:2px solid #7badd4;outline-offset:-2px}
 .mindmap-tools{display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:8px;background:#fafcfd;border-bottom:1px solid #e9edf1}
 .mindmap-hint{padding:8px 12px;color:#7f8b97;font-size:12px;background:#fafcfd}
@@ -174,7 +183,8 @@ body.document-fullscreen #app{visibility:hidden}
 .rich-writing-hint{font-size:12px}
 .rich-editor .tiptap .document-diagram-block p{margin:0;line-height:1.35}
 .visual-mindmap .me-tpc{font-size:15px}
-.visual-flowchart{height:420px;width:100%;position:relative;overflow:hidden;background:#fff;outline:none;font-size:15px}
+.visual-flowchart{min-height:260px;height:260px;width:100%;position:relative;overflow:hidden;background:#fff;outline:none;font-size:15px}
+.document-diagram-block .visual-flowchart{height:auto}
 .visual-flowchart:focus-visible{outline:2px solid #7badd4;outline-offset:-2px}
 .visual-map-editor .visual-flowchart{height:550px}
 .document-diagram-block.is-expanded .visual-flowchart{height:auto;min-height:200px;flex:1}
