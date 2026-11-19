@@ -240,8 +240,20 @@ export function mountComposer(root,{content,projectId,docId,tableWidths=[],onTab
   listen($('.rich-link-form'),'submit',event=>{event.preventDefault();const url=$('#rich-link-url').value.trim();if(!(linkKind==='imageLink'?/^https?:\/\//i:/^(https?:\/\/|mailto:)/i).test(url)){onError(new Error('请输入有效的 http / https 地址。'));return;}if(linkKind==='imageLink')rich.chain().focus().setImage({src:url,alt:'设计参考图'}).run();else{const c=rich.chain().focus().extendMarkRange('link');if(rich.state.selection.empty&&!rich.isActive('link'))c.insertContent({type:'text',text:url,marks:[{type:'link',attrs:{href:url}}]}).run();else c.setLink({href:url}).run();}$('.rich-link-form').hidden=true;});
   listen(document,'pointerdown',event=>{if(!root.contains(event.target)){hideMenu();bubble.hidden=true;}});
   listen(root,'keydown',event=>{if(event.key==='Escape'&&(!menu.hidden||!$('.rich-link-form').hidden||!$('.rich-find').hidden)){hideMenu();$('.rich-link-form').hidden=true;$('.rich-find').hidden=true;event.stopPropagation();event.preventDefault();}});
+  // 表格边缘加号：用 ProseMirror 光标定位到表格最后一个单元格内再追加列/行，不依赖 DOM 选区。
+  function tableAction(dir){
+   if(sourceMode||readOnly)return false;
+   let pos=-1;
+   rich.state.doc.descendants((node,offset)=>{
+    if(node.type.name==='tableCell'||node.type.name==='tableHeader')pos=offset+1;
+   });
+   if(pos<0)return false;
+   const chain=rich.chain().focus().setTextSelection(pos);
+   if(dir==='col')chain.addColumnAfter().run();else chain.addRowAfter().run();
+   return true;
+  }
   // Keep uncommon raw HTML and comments available verbatim in the source view.
   if(/<!--|<(?:details|summary|iframe|script|style|div|span|table)\b/i.test(content)){command('source');$('#rich-mode-hint').textContent='此文档包含 HTML，已保留源码编辑，避免格式丢失。';}
   update();
-  return {destroy(){destroyed=true;cancelAnimationFrame(frame);controller.abort();rich.destroy();},get pendingImages(){return uploads.size;},flushImages:()=>Promise.all([...uploads]),flushBlocks(){for(const view of blockViews)view.flush();},getMarkdown:()=>original,focus:()=>sourceMode?source.focus():rich.commands.focus()};
+  return {destroy(){destroyed=true;cancelAnimationFrame(frame);controller.abort();rich.destroy();},get pendingImages(){return uploads.size;},flushImages:()=>Promise.all([...uploads]),flushBlocks(){for(const view of blockViews)view.flush();},getMarkdown:()=>original,focus:()=>sourceMode?source.focus():rich.commands.focus(),tableAction};
 }

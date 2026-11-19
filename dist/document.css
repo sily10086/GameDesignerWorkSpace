@@ -102,13 +102,13 @@ body.document-fullscreen #app{visibility:hidden}
 .rich-editor .tiptap.resize-cursor,.rich-editor .tiptap.resize-cursor *{cursor:col-resize!important}
 .rich-editor .tiptap .column-resize-dragging{background:#eaf1ff}
 .rich-editor.is-reading .tiptap .column-resize-handle{display:none}
-/* 飞书式悬浮加号：贴在各行右侧 / 各列底部，平时隐藏，鼠标移入表格才浮现 */
+/* 飞书式悬浮加号：整张表右侧一个（加列）、下方一个（加行），只在末尾追加；平时隐藏，鼠标移入表格才浮现 */
 .rich-editor .gd-table-add{position:absolute;width:18px;height:18px;padding:0;line-height:16px;text-align:center;font-size:15px;cursor:pointer;color:#2f6feb;background:#fff;border:1px solid #c9d9f5;border-radius:5px;z-index:6;user-select:none;opacity:0;transition:opacity .12s,background .12s,color .12s;box-shadow:0 1px 3px #1f3a6a1a}
 .rich-editor .tableWrapper:hover .gd-table-add,.rich-editor .gd-table-add:focus-visible{opacity:1}
 .rich-editor .gd-table-add:hover{background:#2f6feb;color:#fff;border-color:#2f6feb}
 .rich-editor .gd-table-add:active{background:#1c5bd4}
-.rich-editor .gd-table-add.gd-add-col{bottom:-10px}
-.rich-editor .gd-table-add.gd-add-row{right:-10px}
+.rich-editor .gd-table-add.gd-add-col{right:0;top:50%;transform:translateY(-50%)}
+.rich-editor .gd-table-add.gd-add-row{bottom:0;left:50%;transform:translateX(-50%)}
 .rich-editor .tableWrapper{padding:0 12px 12px 0;margin-bottom:6px}
 .rich-editor.is-reading .gd-table-add{display:none}
 .rich-editor .tiptap td,.rich-editor .tiptap th{border:1px solid #dfe7dc;padding:8px 10px;min-width:45px;vertical-align:top;position:relative;font-weight:400}

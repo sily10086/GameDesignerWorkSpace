@@ -7,22 +7,20 @@ export function mountVisualMindmap(root,{source,onChange=()=>{},onError=console.
  let mind,destroyed=false,enabled=editable,ready=false;const abort=new AbortController();const data=parseMindmap(source);layout.value=data.direction;let last=serializeMindmap(data);
  function status(){toolbar.hidden=!enabled;hint.hidden=!enabled;root.dataset.editable=String(enabled);}
  const report=()=>{if(!mind||!ready||destroyed)return;try{const next=serializeMindmap(mind.getData());if(next!==last){onChange(next);last=next;}}catch(error){onError(error);}};
- // 内嵌在文档里的导图高度随内容撑开；全屏编辑页签保持固定高度、由 scaleFit 适配。
- const MIN_H=220,MAX_H=720,PAD=24;
+ // 内嵌导图容器高度跟随内容自然高度；由 scaleFit 把整张图完整缩放进容器（根节点不会被推到中央导致裁切）。
+ const MIN_H=220,MAX_H=760,PAD=24;
  function fitCanvas(){
   if(!mind||!ready||destroyed)return;
   const block=canvas.closest('.document-diagram-block');
   if(!block){mind.scaleFit();return;}
   if(block.classList.contains('is-expanded')){canvas.style.height='';mind.scaleFit();return;}
   const nodes=canvas.querySelector('.me-nodes');if(!nodes)return;
-  // 导图横向铺开，先按文档可用宽度算出缩放比，再用缩放后的真实高度撑开画布，
-  // 避免用未缩放高度导致大片留白。不放大，只缩小。
-  const availW=Math.max(200,canvas.clientWidth-PAD*2);
-  const natW=nodes.offsetWidth||1,natH=nodes.offsetHeight||1;
-  const scale=Math.max(0.15,Math.min(1,availW/natW));
-  const target=Math.max(MIN_H,Math.min(MAX_H,Math.ceil(natH*scale)+PAD*2));
+  // 容器高度按内容自然高度撑开（不乘缩放），scaleFit 会同时按宽高把整图缩进容器，
+  // 保证所有分支完整可见；超出上限时自动缩小而不是裁切。
+  const natH=nodes.offsetHeight||1;
+  const target=Math.max(MIN_H,Math.min(MAX_H,Math.ceil(natH)+PAD*2));
   if(Math.abs(canvas.clientHeight-target)>2)canvas.style.height=target+'px';
-  mind.scale(scale);mind.toCenter();
+  mind.scaleFit();
  }
  const initialized=(async()=>{const [{default:MindElixir},{zh_CN}]=await Promise.all([import('mind-elixir'),import('mind-elixir/i18n')]);if(destroyed)return;
   mind=new MindElixir({el:canvas,direction:data.direction,editable:enabled,allowUndo:true,toolBar:false,contextMenu:{locale:zh_CN,focus:false,link:false},keypress:true,newTopicName:'新主题',overflowHidden:true,scaleMin:.15,scaleMax:2.5,theme:{name:'Document Tree',type:'light',palette:['#74b7eb','#ac98e8','#60c8ba','#e5b36d'],cssVar:{'--root-color':'#fff','--root-bgcolor':'#17242c','--root-border-color':'#17242c','--root-radius':'7px','--main-radius':'5px','--main-color':'#233243','--main-bgcolor':'#edf4fb','--main-border':'1px solid #a7b4c0','--color':'#25313d','--bgcolor':'#fff','--main-gap-x':'44px','--main-gap-y':'24px','--node-gap-x':'32px','--node-gap-y':'12px','--topic-padding':'7px 12px','--map-padding':'30px'}},before:{createArrow:()=>false,createSummary:()=>false,reshapeNode:(_topic,patch)=>!patch?.image}});
