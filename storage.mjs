@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import {createHash,randomUUID} from 'node:crypto';
 import {validateWorkspace,collectionNames} from './dist/project-model.js';
 
@@ -156,7 +157,7 @@ export class ProjectStore {
     if(!meta||meta.id!==expectedId)throw new StorageError('项目目录与 project.json 的 ID 不一致。',409);
     return meta;
   }
-  // 把回收站项目从磁盘清掉。internal 项目删除整个文件夹；外部关联项目只解除关联，保留用户自己的文件夹。
+  // 把回收站项目从磁盘清掉：内部项目删 Project/<id>，外部关联项目删它关联的那个文件夹。
   // 先完成全部校验，再修改磁盘：任何一个 id 不合法时，不能出现“前面的项目已经删掉、后面的报错”的半完成状态。
   async purgeProjects(ids){
     if(!Array.isArray(ids)||!ids.length||ids.length>500)throw new StorageError('要清理的项目数量无效。');
@@ -165,10 +166,25 @@ export class ProjectStore {
     const plans=[];
     for(const id of unique){
       if(this.mounts.has(id)){
-        // 外部关联项目：元数据缺失/目录已不存在也允许解除关联，但绝不删除用户自己的目录。
-        const meta=await this.readProjectMeta(this.mounts.get(id),id,{allowMissing:true});
-        if(meta&&!trashed(meta))throw new StorageError('只能清理回收站中的项目：'+(meta.name||id),409);
-        plans.push({id,type:'detach'});
+        // 外部关联项目：目录已经是这个项目的文件夹，就先确认它确实处于回收站，再删掉整个文件夹。
+        // 目录已经不在磁盘上（只剩索引残留）时无处可删，退化为解除关联。
+        const directory=path.resolve(this.mounts.get(id));
+        let info;
+        try{info=await fs.lstat(directory);}
+        catch(error){
+          if(error.code!=='ENOENT')throw error;
+          const meta=await this.readProjectMeta(directory,id,{allowMissing:true});
+          if(meta&&!trashed(meta))throw new StorageError('只能清理回收站中的项目：'+(meta.name||id),409);
+          plans.push({id,type:'detach'});continue;
+        }
+        if(info.isSymbolicLink())throw new StorageError('不支持删除符号链接指向的目录：'+directory,409);
+        if(!info.isDirectory())throw new StorageError('项目目录无效：'+directory,409);
+        const blocked=this.unsafePurgeTarget(directory);
+        if(blocked)throw new StorageError(blocked,409);
+        // 目录存在但读不到 project.json 时宁可报错，也不能删掉一个无法证明是项目的文件夹。
+        const meta=await this.readProjectMeta(directory,id);
+        if(!trashed(meta))throw new StorageError('只能清理回收站中的项目：'+(meta.name||id),409);
+        plans.push({id,type:'remove',directory,external:true});
         continue;
       }
       const expected=path.join(this.directory,id);
@@ -188,18 +204,22 @@ export class ProjectStore {
       for(const plan of plans){
         if(plan.type==='missing'){skipped.push(plan.id);continue;}
         if(plan.type==='detach'){
-          this.registry=this.registry.filter(item=>item.id!==plan.id);
-          this.mounts.delete(plan.id);this.suppressedLegacy.add(plan.id);registryChanged=true;detached.push(plan.id);continue;
+          this.dropMount(plan.id);registryChanged=true;detached.push(plan.id);continue;
         }
-        const temp=path.join(this.directory,'.purge-'+plan.id+'-'+randomUUID());
+        const temp=path.join(path.dirname(plan.directory),'.purge-'+plan.id+'-'+randomUUID());
         try{await fs.rename(plan.directory,temp);}
         catch(error){
-          if(error.code==='ENOENT'){skipped.push(plan.id);continue;}
-          throw new StorageError('无法删除项目文件夹，请检查文件是否被占用：'+path.relative(this.root,plan.directory),409);
+          if(error.code==='ENOENT'){
+            skipped.push(plan.id);
+            if(plan.external){this.dropMount(plan.id);registryChanged=true;}
+            continue;
+          }
+          throw new StorageError('无法删除项目文件夹，请检查文件是否被占用：'+(plan.external?plan.directory:path.relative(this.root,plan.directory)),409);
         }
         purged.push(plan.id);
+        if(plan.external){this.dropMount(plan.id);registryChanged=true;}
         try{await fs.rm(temp,{recursive:true,force:true});}
-        catch{/* 已从项目库移出，保留警告由前端提示，不能让半删的目录重新出现在回收站。 */warnings.push({id:plan.id,message:'项目已移出项目库，但临时目录未能完全删除：'+path.relative(this.root,temp)});}
+        catch{/* 已从项目库移出，保留警告由前端提示，不能让半删的目录重新出现在回收站。 */warnings.push({id:plan.id,message:'项目已移出项目库，但临时目录未能完全删除：'+(plan.external?temp:path.relative(this.root,temp))});}
       }
       if(registryChanged)await this.saveRegistry();
     }catch(error){
@@ -207,6 +227,17 @@ export class ProjectStore {
       this.registry=registryBefore;this.mounts=mountsBefore;this.suppressedLegacy=suppressedBefore;throw error;
     }
     return {purged,detached,skipped,warnings};
+  }
+  // 解除一个外部关联：索引、内存映射、旧版目录回填都一并清掉。
+  dropMount(id){this.registry=this.registry.filter(item=>item.id!==id);this.mounts.delete(id);this.suppressedLegacy.add(id);}
+  // 删外部文件夹前的红线：磁盘根、用户主目录、工作台自身的目录，以及包含工作台的那些上级目录，一律拒绝。
+  unsafePurgeTarget(directory){
+    if(directory===path.parse(directory).root)return '拒绝删除磁盘根目录：'+directory;
+    if(directory===path.resolve(os.homedir()))return '拒绝删除用户主目录：'+directory;
+    const guarded=[this.root,this.privateDirectory,this.externalRoot].filter(Boolean).map(item=>path.resolve(item));
+    if(guarded.includes(directory))return '拒绝删除工作台自己的目录：'+directory;
+    if(guarded.some(item=>item.startsWith(directory+path.sep)))return '这个文件夹包含工作台自身，拒绝删除：'+directory;
+    return '';
   }
   async save(base,state,{purge=[]}={}){return this.serialize(async()=>{
     if(!base||!state||!Array.isArray(base.projects)||!Array.isArray(state.projects))throw new StorageError('项目数据格式无效，未写入磁盘。');

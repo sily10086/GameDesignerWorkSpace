@@ -155,7 +155,7 @@ try{
  assert.equal(await exists(brokenDir),true,'无法证明 deletedAt 时不能删除目录');
  await fs.rm(brokenDir,{recursive:true,force:true});
 
- // ---------- 外部关联项目：只解除关联，绝不删除用户目录 ----------
+ // ---------- 外部关联项目：连它关联的文件夹一起删除 ----------
  const outside=await tmp('gamedesigner-outside-test-');
  const outerRoot=await tmp('gamedesigner-outer-test-');
  const externalStore=new ProjectStore(outerRoot,{externalRoot:outside});await externalStore.init();
@@ -167,17 +167,25 @@ try{
  const extLieBase=clone(externalState);extLieBase.projects[0].deletedAt=new Date().toISOString();
  await assert.rejects(externalStore.save(extLieBase,empty,{purge:[externalId]}),e=>e.status===409);
  assert.equal(await exists(externalDir),true);
+ // 危险目标兜底：不能把工作台自己的目录当成项目文件夹删掉。
+ externalStore.mounts.set(externalId,outerRoot);
+ await assert.rejects(externalStore.purgeProjects([externalId]),e=>e.status===409&&/拒绝删除工作台自己的目录/.test(e.message));
+ assert.equal(await exists(outerRoot),true);
+ externalStore.mounts.set(externalId,externalDir);
  const externalDeleted=clone(externalState);markProjectDeleted(externalDeleted,externalId);await externalStore.save(externalState,externalDeleted);
  const externalFinal=clone(externalDeleted);purgeProjects(externalFinal,[externalId]);
  const externalResult=await externalStore.save(await externalStore.load(),externalFinal,{purge:[externalId]});
- assert.equal(externalResult.detached,1);assert.equal(externalResult.purged,0);
- assert.ok((await fs.stat(externalDir)).isDirectory(),'外部项目文件夹必须保留');
- assert.equal(await fs.readFile(path.join(externalDir,'user-notes.txt'),'utf8'),'keep');
+ assert.equal(externalResult.purged,1);assert.equal(externalResult.detached,0);
+ assert.equal(await exists(externalDir),false,'外部关联项目的文件夹要一起删掉');
  assert.equal((await externalStore.load()).projects.length,0);
  const registry=JSON.parse(await fs.readFile(path.join(outerRoot,'.workbench','library.json'),'utf8'));
  assert.equal(registry.projects.some(item=>item.id===externalId),false,'library.json 不能残留外部关联');
  const freshExternal=new ProjectStore(outerRoot,{externalRoot:outside});await freshExternal.init();
  assert.equal((await freshExternal.load()).projects.some(q=>q.id===externalId),false,'重新载入不能从 registry 复现');
+ // 文件夹已经被用户自己删掉：不要再报错，只清掉索引里的关联。
+ const ghostId='ghostproject001';externalStore.mounts.set(ghostId,path.join(outside,ghostId));
+ const ghostDetach=await externalStore.purgeProjects([ghostId]);
+ assert.deepEqual(ghostDetach.detached,[ghostId]);assert.equal(externalStore.mounts.has(ghostId),false);
 
  // ---------- 自定义项目名与安全渲染（原有覆盖） ----------
  const custom=makeProject('自定义游戏：星港计划','模拟经营','Godot','名字由用户决定');state.projects.push(custom);assert.equal(validateWorkspace(state),true);await store.save(original,state);assert.ok((await store.load()).projects.some(q=>q.name==='自定义游戏：星港计划'));
@@ -243,7 +251,7 @@ try{
  assert.ok(modalHtml.includes('不可恢复'),'确认弹窗要写明不可恢复');
  assert.ok(modalHtml.includes(p.name),'确认弹窗要列出项目名');
  assert.ok(modalHtml.includes('confirm-purge-trash'));
- assert.ok(modalHtml.includes('外部项目只解除本机关联'));
+ assert.ok(modalHtml.includes('会连同它关联的那个文件夹一起删掉'));
  // 成功后切换到清理后的状态，失败时保留原项目。
  let askedIds=null;
  context.qa.getDisk().purge=async ids=>{askedIds=ids;const next=clone(allDeleted);next.projects=next.projects.filter(q=>!ids.includes(q.id));next.active=null;return {state:next,result:{purged:ids.length,detached:0,skipped:0,warnings:[]}};};
@@ -269,9 +277,11 @@ try{
  assert.ok(singleModal.includes(p.name),'单项目确认弹窗要列出项目名');
  assert.ok(singleModal.includes('整个项目文件夹'),'内部项目要说明删除整个文件夹');
  assert.ok(singleModal.includes('data-action="confirm-purge-project"')&&singleModal.includes('data-id="'+p.id+'"'));
- context.qa.getDisk().projectInfo[p.id]={external:true};
+ context.qa.getDisk().projectInfo[p.id]={external:true,directory:'D:\\Outside\\Demo'};
  context.qa.confirmPurgeProject(p.id);
- assert.ok(element('#modal-root').innerHTML.includes('只解除本机关联，你自己的文件夹会保留'),'外部项目要说明只解除关联');
+ const externalModal=element('#modal-root').innerHTML;
+ assert.ok(externalModal.includes('会从磁盘删除它关联的项目文件夹'),'外部项目要说明连文件夹一起删');
+ assert.ok(externalModal.includes('D:\\Outside\\Demo'),'外部项目要写明将被删除的文件夹路径');
  delete context.qa.getDisk().projectInfo[p.id];
  context.qa.setState(clone(allDeleted));
  let singleIds=null;

@@ -148,8 +148,8 @@ async function restoreLibraryProject(id){try{const p=restoreProject(state,id);pe
 function confirmPurgeTrash(){
  const trash=state.projects.filter(p=>p.deletedAt);
  if(!trash.length)return toast('回收站已经是空的。');
- const shown=trash.map(p=>`<li>${esc(p.name)}</li>`).join('');
- modal('清空回收站',`<div class="project-delete-message"><span>${icon('close')}</span><h3>${trash.length} 个项目将被彻底删除</h3><p><strong>此操作不可恢复。</strong>内部项目会从磁盘删除整个项目文件夹，任务、文档、图表、图片附件和回收站内容都会一并消失。</p><ul class="purge-list">${shown}</ul><small>通过「关联文件夹 / 链接导入」的外部项目只解除本机关联，你自己的文件夹会保留。</small></div>`,`<button class="btn" data-action="close-modal">取消</button><button class="btn danger" data-action="confirm-purge-trash">彻底删除 ${trash.length} 个项目</button>`);
+ const shown=trash.map(p=>{const info=disk.projectInfo[p.id]||{};return `<li>${esc(p.name)}${info.external&&info.directory?`<small>${esc(info.directory)}</small>`:''}</li>`;}).join('');
+ modal('清空回收站',`<div class="project-delete-message"><span>${icon('close')}</span><h3>${trash.length} 个项目将被彻底删除</h3><p><strong>此操作不可恢复。</strong>每个项目都会从磁盘删除它自己的文件夹，任务、文档、图表、图片附件和回收站内容都会一并消失。</p><ul class="purge-list">${shown}</ul><small>外部关联项目（关联文件夹 / 链接导入）会连同它关联的那个文件夹一起删掉，文件夹里属于你自己的其它文件也会消失。</small></div>`,`<button class="btn" data-action="close-modal">取消</button><button class="btn danger" data-action="confirm-purge-trash">彻底删除 ${trash.length} 个项目</button>`);
 }
 let purgeBusy=false;
 async function purgeTrash(){
@@ -169,9 +169,10 @@ async function purgeTrash(){
 function confirmPurgeProject(id){
  const p=state.projects.find(q=>q.id===id&&q.deletedAt);
  if(!p)return;
- const external=Boolean(disk.projectInfo[id]?.external);
- const detail=external?'只解除本机关联，你自己的文件夹会保留':'会从磁盘删除整个项目文件夹，任务、文档、图表、图片附件和回收站内容都会一并消失';
- modal('彻底删除项目',`<div class="project-delete-message"><span>${icon('close')}</span><h3>${esc(p.name)}</h3><p><strong>此操作不可恢复。</strong>${detail}。</p><small>${external?'外部关联项目只解除本机的 library.json 关联，不会触碰你的文件夹。':'内部项目位于 Project/${esc(p.id)}，删除后不受 Git / SVN 同步保护。'}</small></div>`,`<button class="btn" data-action="close-modal">取消</button><button class="btn danger" data-action="confirm-purge-project" data-id="${p.id}">彻底删除</button>`);
+ const info=disk.projectInfo[id]||{};
+ const external=Boolean(info.external);
+ const detail=external?`会从磁盘删除它关联的项目文件夹${info.directory?` ${esc(info.directory)}`:''}，任务、文档、图表、图片附件和回收站内容都会一并消失`:'会从磁盘删除整个项目文件夹，任务、文档、图表、图片附件和回收站内容都会一并消失';
+ modal('彻底删除项目',`<div class="project-delete-message"><span>${icon('close')}</span><h3>${esc(p.name)}</h3><p><strong>此操作不可恢复。</strong>${detail}。</p><small>${external?`外部关联项目位于 ${esc(info.directory||'你的磁盘目录')}，这个文件夹里的所有内容（包括你自己放进去的文件）都会一起消失，也不受 Git / SVN 同步保护。`:`内部项目位于 Project/${esc(p.id)}，删除后不受 Git / SVN 同步保护。`}</small></div>`,`<button class="btn" data-action="close-modal">取消</button><button class="btn danger" data-action="confirm-purge-project" data-id="${p.id}">彻底删除</button>`);
 }
 async function purgeProject(id){
  if(purgeBusy)return;
