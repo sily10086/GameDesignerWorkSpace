@@ -15,6 +15,7 @@ export function detectImage(data){
   throw new StorageError('请选择 PNG、JPG、GIF、WebP 或 AVIF 图片。',415);
 }
 const safeId=id=>typeof id==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id);
+const trashed=project=>typeof project?.deletedAt==='string'&&Number.isFinite(Date.parse(project.deletedAt));
 const sortObject=value=>Array.isArray(value)?value.map(sortObject):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,sortObject(value[k])])):value;
 export const json=value=>JSON.stringify(sortObject(value),null,2)+'\n';
 const digest=value=>createHash('sha256').update(value).digest('hex');
@@ -138,7 +139,87 @@ export class ProjectStore {
   async recoverTransactions(){for(const entry of await this.entries(path.join(this.privateDirectory,'transactions'))){if(!entry.name.endsWith('.json'))continue;const file=path.join(this.privateDirectory,'transactions',entry.name),journal=JSON.parse(await fs.readFile(file,'utf8'));for(const c of journal){const current=await this.raw(c.path);if(current!==c.before&&current!==c.after)throw new StorageError('有未完成保存且文件已被外部修改，请检查 '+file,409);}for(const c of journal)await this.apply(c.path,c.before);for(const c of journal)if(c.before===null)await this.prune(path.dirname(this.resolveFile(c.path)));await fs.unlink(file);}}
   async prune(folder){const root=this.fileRoot(path.join(folder,'_'));while(folder.startsWith(root+path.sep)){try{await fs.rmdir(folder);}catch(e){if(['ENOTEMPTY','ENOENT','EEXIST'].includes(e.code))return;throw e;}folder=path.dirname(folder);}}
   async transaction(changes){if(!changes.length)return;const journal=[];for(const c of changes)journal.push({path:c.path,before:await this.raw(c.path),after:c.content});const journalPath=path.join(this.privateDirectory,'transactions',randomUUID()+'.json');await this.atomic(journalPath,json(journal));try{for(const c of changes)await this.apply(c.path,c.content);for(const c of changes)if(c.content===null)await this.prune(path.dirname(this.resolveFile(c.path)));await fs.unlink(journalPath);}catch(e){try{for(const c of journal)await this.apply(c.path,c.before);for(const c of journal)if(c.before===null)await this.prune(path.dirname(this.resolveFile(c.path)));await fs.unlink(journalPath);}catch{throw new StorageError('保存中断。恢复记录位于 '+journalPath+'；请重启服务恢复。',500);}throw e;}}
-  async save(base,state){return this.serialize(async()=>{
+  // 读取项目元数据并校验归属。清理操作只信任磁盘上的 project.json，不信任前端传来的状态。
+  async readProjectMeta(directory,expectedId,{allowMissing=false}={}){
+    try{await this.assertNoSymlink(directory);}
+    catch(error){if(allowMissing&&error.code==='ENOENT')return null;throw error;}
+    const file=path.join(directory,'project.json');await this.checkParents(file);
+    let raw;
+    try{raw=await fs.readFile(file,'utf8');}
+    catch(error){
+      if(allowMissing&&error.code==='ENOENT')return null;
+      if(error.code==='ENOENT')throw new StorageError('项目元数据缺失，未删除目录：'+path.relative(this.root,directory),409);
+      throw error;
+    }
+    let meta;try{meta=JSON.parse(raw.replace(/^\uFEFF/,''));}
+    catch{throw new StorageError('项目元数据无法读取，未删除目录：'+path.relative(this.root,directory),409);}
+    if(!meta||meta.id!==expectedId)throw new StorageError('项目目录与 project.json 的 ID 不一致。',409);
+    return meta;
+  }
+  // 把回收站项目从磁盘清掉。internal 项目删除整个文件夹；外部关联项目只解除关联，保留用户自己的文件夹。
+  // 先完成全部校验，再修改磁盘：任何一个 id 不合法时，不能出现“前面的项目已经删掉、后面的报错”的半完成状态。
+  async purgeProjects(ids){
+    if(!Array.isArray(ids)||!ids.length||ids.length>500)throw new StorageError('要清理的项目数量无效。');
+    const unique=[...new Set(ids)];
+    if(unique.some(id=>!safeId(id)))throw new StorageError('项目 ID 无效。');
+    const plans=[];
+    for(const id of unique){
+      if(this.mounts.has(id)){
+        // 外部关联项目：元数据缺失/目录已不存在也允许解除关联，但绝不删除用户自己的目录。
+        const meta=await this.readProjectMeta(this.mounts.get(id),id,{allowMissing:true});
+        if(meta&&!trashed(meta))throw new StorageError('只能清理回收站中的项目：'+(meta.name||id),409);
+        plans.push({id,type:'detach'});
+        continue;
+      }
+      const expected=path.join(this.directory,id);
+      let info;
+      try{info=await fs.lstat(expected);}
+      catch(error){if(error.code==='ENOENT'){plans.push({id,type:'missing'});continue;}throw error;}
+      if(info.isSymbolicLink())throw new StorageError('Project 中不支持符号链接：'+path.relative(this.root,expected),409);
+      if(!info.isDirectory())throw new StorageError('项目目录无效：'+path.relative(this.root,expected),409);
+      const meta=await this.readProjectMeta(expected,id);
+      if(!trashed(meta))throw new StorageError('只能清理回收站中的项目：'+(meta.name||id),409);
+      plans.push({id,type:'remove',directory:expected});
+    }
+    // 执行阶段。先改成隐藏的临时目录，避免删到一半（例如图片被占用）留下缺少 project.json 的损坏项目目录。
+    const purged=[],detached=[],skipped=[],warnings=[];let registryChanged=false;
+    const registryBefore=this.registry.map(item=>({...item})),mountsBefore=new Map(this.mounts),suppressedBefore=new Set(this.suppressedLegacy);
+    try{
+      for(const plan of plans){
+        if(plan.type==='missing'){skipped.push(plan.id);continue;}
+        if(plan.type==='detach'){
+          this.registry=this.registry.filter(item=>item.id!==plan.id);
+          this.mounts.delete(plan.id);this.suppressedLegacy.add(plan.id);registryChanged=true;detached.push(plan.id);continue;
+        }
+        const temp=path.join(this.directory,'.purge-'+plan.id+'-'+randomUUID());
+        try{await fs.rename(plan.directory,temp);}
+        catch(error){
+          if(error.code==='ENOENT'){skipped.push(plan.id);continue;}
+          throw new StorageError('无法删除项目文件夹，请检查文件是否被占用：'+path.relative(this.root,plan.directory),409);
+        }
+        purged.push(plan.id);
+        try{await fs.rm(temp,{recursive:true,force:true});}
+        catch{/* 已从项目库移出，保留警告由前端提示，不能让半删的目录重新出现在回收站。 */warnings.push({id:plan.id,message:'项目已移出项目库，但临时目录未能完全删除：'+path.relative(this.root,temp)});}
+      }
+      if(registryChanged)await this.saveRegistry();
+    }catch(error){
+      // 文件系统部分无法回滚，但索引必须和磁盘保持一致：失败时恢复内存中的关联，避免 library.json 与实际不同步。
+      this.registry=registryBefore;this.mounts=mountsBefore;this.suppressedLegacy=suppressedBefore;throw error;
+    }
+    return {purged,detached,skipped,warnings};
+  }
+  async save(base,state,{purge=[]}={}){return this.serialize(async()=>{
+    if(!base||!state||!Array.isArray(base.projects)||!Array.isArray(state.projects))throw new StorageError('项目数据格式无效，未写入磁盘。');
+    if(!Array.isArray(purge)||purge.length>500)throw new StorageError('要清理的项目数量无效。');
+    const purgeTargets=new Set(purge);
+    if([...purgeTargets].some(id=>!safeId(id)))throw new StorageError('项目 ID 无效。');
+    for(const id of purgeTargets){
+      const remaining=state.projects.find(p=>p.id===id);
+      if(remaining)throw new StorageError('要清理的项目仍在项目库中，未执行清理。',409);
+      const prior=base.projects?.find(p=>p.id===id);
+      // 前端提交的 base 必须已经把这些项目移入回收站；磁盘 project.json 才是最终依据。
+      if(prior&&!trashed(prior))throw new StorageError('只能清理回收站中的项目：'+(prior.name||id),409);
+    }
     const created=[];if(this.externalRoot){for(const p of state.projects){if(!base.projects.some(q=>q.id===p.id)&&!this.mounts.has(p.id)){const destination=path.join(this.externalRoot,p.id);await fs.mkdir(destination,{recursive:true});this.mounts.set(p.id,destination);this.registry.push({id:p.id,name:p.name,directory:destination});created.push(p.id);}}if(created.length)await this.saveRegistry();}
     try{
     const diskState=await this.load(),before=workspaceFiles(base),after=workspaceFiles(state),current=workspaceFiles(diskState),changes=[],conflicts=[];
@@ -147,6 +228,8 @@ export class ProjectStore {
       if(previous&&!previous.deletedAt&&!p.deletedAt&&onDisk?.deletedAt&&[...new Set([...before.keys(),...after.keys()])].some(name=>name.startsWith(p.id+'/')&&before.get(name)!==after.get(name)))conflicts.push(p.id+'/project.json');
     }
     for(const name of new Set([...before.keys(),...after.keys()])){
+      // 被清理项目的文件由 purgeProjects 整目录处理，不能让事务再写一遍或回滚回来。
+      if(purgeTargets.has(name.split('/')[0]))continue;
       const oldValue=before.get(name),newValue=after.get(name),diskValue=current.get(name);
       if(oldValue===newValue||diskValue===newValue)continue;
       if(name.includes('/activity/')){if(newValue!==undefined&&diskValue===undefined)changes.push({path:name,content:newValue});continue;}
@@ -154,7 +237,10 @@ export class ProjectStore {
       changes.push({path:name,content:newValue??null});
     }
     if(conflicts.length)throw new StorageError('这些文件已被其他页面或 Git/SVN 更新，未覆盖磁盘内容。',409,conflicts);
-    await this.transaction(changes);for(const id of created)await this.writeFormat(id);return {savedAt:new Date().toISOString(),changedFiles:changes.length};
+    // 清理必须在事务之前完成：事务失败回滚只恢复 base→state 的普通文件，不会把已清理的项目写回。
+    const purgeResult=purgeTargets.size?await this.purgeProjects([...purgeTargets]):{purged:[],detached:[],skipped:[],warnings:[]};
+    await this.transaction(changes);for(const id of created)await this.writeFormat(id);
+    return {savedAt:new Date().toISOString(),changedFiles:changes.length,purged:purgeResult.purged.length,detached:purgeResult.detached.length,skipped:purgeResult.skipped.length,warnings:purgeResult.warnings};
     }catch(error){if(created.length){this.registry=this.registry.filter(item=>!created.includes(item.id));for(const id of created)this.mounts.delete(id);await this.saveRegistry();}throw error;}
   });}
   async importLegacy(state){if(!validateWorkspace(state)||!state.projects.length)throw new StorageError('旧浏览器项目格式无效。');const marker=path.join(this.privateDirectory,'migrations',digest(json(state))+'.json');try{await fs.access(marker);return {alreadyMigrated:true};}catch(e){if(e.code!=='ENOENT')throw e;}const base=await this.load(),desired=structuredClone(base);for(const original of state.projects){const p=structuredClone(original),existing=desired.projects.find(x=>x.id===p.id);if(existing){if(json(existing)===json(p))continue;p.id=randomUUID();p.name=p.name.slice(0,165)+'（浏览器迁移）';}desired.projects.push(p);}await this.save(base,desired);await this.atomic(marker,json({migratedAt:new Date().toISOString(),projects:state.projects.map(p=>p.id)}));return {alreadyMigrated:false};}

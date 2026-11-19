@@ -9,7 +9,7 @@ using System.Windows.Forms;
 using System.Security.Cryptography;
 using System.Web.Script.Serialization;
 [assembly:System.Reflection.AssemblyTitle("GameDesignerWorkerSpace")]
-[assembly:System.Reflection.AssemblyVersion("1.6.0.0")]
+[assembly:System.Reflection.AssemblyVersion("1.7.0.0")]
 class Program {
  public static string Root=AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
  public static string Key {get{using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(Root.ToLowerInvariant()))).Replace("-","").Substring(0,24);}}

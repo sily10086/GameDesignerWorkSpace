@@ -1,4 +1,4 @@
-# GameDesignerWorkerSpace 1.6
+# GameDesignerWorkerSpace 1.7
 
 Windows x64 EXE 网页工作台，安装包自带 Node / Git / SVN。程序与每个游戏项目完全分离。
 
@@ -40,6 +40,7 @@ Windows x64，Node 24.15.0：运行 `npm ci`、`npm run prepare:runtime`、`npm 
 - 上传：仅提交该项目。Git 生成提交并推送绑定分支，SVN 提交新增/修改/删除。Git 作者姓名邮箱仅作用于此提交。
 - 更新：工作副本有本地变更时拒绝覆盖；Git 只允许快进更新，不强制推送，不自动解决团队冲突。
 - 项目回收站：软删除和恢复写入该项目的 project.json，不删除整个工作副本。
+- 清空回收站：只清理已移入回收站（deletedAt）的项目，需要二次确认且不可恢复。内部项目（`Project/<项目ID>/`）删除整个文件夹，包括 attachments、文档 Image 等所有目录；通过「关联文件夹 / 链接导入」挂载的外部项目只从 Data/library.json 解除关联，绝不删除用户自己的文件夹。服务端会重新校验磁盘上的 project.json，失败时保留页面状态以便重试。
 
 仓库链接保存在项目目录的 .gdws/repository.json。Data/library.json 只记录本机目录位置，不承载整个工作台的远程仓库配置。账号/Token 只保留在服务内存，不写入项目或安装包；SSH 使用用户自己的密钥。
 

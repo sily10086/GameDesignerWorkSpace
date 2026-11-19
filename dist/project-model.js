@@ -49,5 +49,17 @@ export function validateWorkspace(state){try{return validBackup(state)&&safeProj
 export function listProjects(state,{deleted=false,query=''}={}){const term=query.trim().toLocaleLowerCase();return state.projects.filter(p=>Boolean(p.deletedAt)===deleted&&(!term||[p.name,p.genre,p.engine,p.desc].join(' ').toLocaleLowerCase().includes(term)));}
 export function markProjectDeleted(state,id,when=new Date().toISOString()){const p=state.projects.find(p=>p.id===id&&!p.deletedAt);if(!p)throw new Error('项目不存在或已被删除。');p.deletedAt=when;if(state.active===id)state.active=null;return p;}
 export function restoreProject(state,id){const p=state.projects.find(p=>p.id===id&&p.deletedAt);if(!p)throw new Error('回收站中没有此项目。');delete p.deletedAt;return p;}
+// 只有回收站里的项目能被彻底清理，避免误删正在使用的项目。
+export function purgeProjects(state,ids=state.projects.filter(p=>p.deletedAt).map(p=>p.id)){
+ if(!Array.isArray(ids))throw new Error('要清理的项目无效。');
+ if(ids.some(id=>typeof id!=='string'||!safeId(id)))throw new Error('项目 ID 无效。');
+ const targets=new Set(ids);
+ if(!targets.size)return [];
+ for(const id of targets){const p=state.projects.find(p=>p.id===id);if(!p)throw new Error('项目不存在。');if(!p.deletedAt)throw new Error('只能清理回收站中的项目。');}
+ const removed=state.projects.filter(p=>targets.has(p.id));
+ state.projects=state.projects.filter(p=>!targets.has(p.id));
+ if(state.active&&targets.has(state.active))state.active=null;
+ return removed;
+}
 export function defaultWorkspace(){const p=makeProject('林间来信','治愈系探索冒险','Unity','在森林与小镇之间，送出一封封信，也连接一个个故事。',true);return {schema:1,active:p.id,projects:[p]};}
 export {makeProject,validBackup,diagramTemplates};
