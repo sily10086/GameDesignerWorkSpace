@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {parseMindmap,serializeMindmap} from '../dist/mindmap-model.js';
+import {parseFlowchart,serializeFlowchart} from '../dist/flowchart-model.js';
+import {MarkdownManager} from '@tiptap/markdown';
+import {editorExtensions} from '../editor-entry.js';
+import {diagramTemplates} from '../dist/project-model.js';
+const mind=parseMindmap(diagramTemplates.mindmap);assert.equal(mind.nodeData.topic,'林间来信');assert.equal(mind.nodeData.children.length,4);
+mind.nodeData.topic='引号 " 与括号 [] <script>\n第二行';mind.nodeData.children[0].expanded=false;
+const serialized=serializeMindmap(mind);assert.deepEqual(parseMindmap(serialized),mind);assert.equal(serializeMindmap(parseMindmap(serialized)),serialized);
+assert.throws(()=>parseMindmap('mindmap\n  root\n  other'),/根节点/);assert.throws(()=>parseMindmap('mindmap\n  root\n    ::icon(fa fa-book)'),/特殊语法/);
+const flow=parseFlowchart(diagramTemplates.flowchart);assert.equal(flow.nodes.length,8);assert.equal(flow.edges.length,8);
+const changed=structuredClone(flow);changed.nodes[0].text='步骤 " <内容>\n下一行';changed.nodes[0].x=640;changed.nodes[0].y=300;
+const flowSource=serializeFlowchart(changed);assert.equal(serializeFlowchart(parseFlowchart(flowSource)),flowSource);assert.equal(parseFlowchart(flowSource).nodes[0].x,640);assert.equal(parseFlowchart(flowSource).nodes[0].text,changed.nodes[0].text);
+assert.throws(()=>parseFlowchart('flowchart TD\n subgraph unsupported'),/特殊语法/);
+const manager=new MarkdownManager({extensions:editorExtensions(),markedOptions:{gfm:true}});
+const content='# 正文\n\n:::gdws-diagram diagram-one\n:::\n\n![文档图片](Image/image.png)\n';
+const parsed=manager.parse(content);assert.equal(parsed.content[1].type,'designDiagram');assert.equal(parsed.content[1].attrs.id,'diagram-one');assert.deepEqual(manager.parse(manager.serialize(parsed)),parsed);
+console.log('PASS: visual mind maps and flowcharts preserve labels, branches, edges, positions, folds and inline document references; unsupported syntax is retained for source editing.');

@@ -1,5 +1,15 @@
 [
   {
+    "name": "@logicflow/core",
+    "version": "2.2.5",
+    "license": "Apache-2.0",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/didi/LogicFlow",
+      "directory": "packages/core"
+    }
+  },
+  {
     "name": "@tiptap/core",
     "version": "3.34.0",
     "license": "MIT",
@@ -250,6 +260,15 @@
     }
   },
   {
+    "name": "classnames",
+    "version": "2.5.1",
+    "license": "MIT",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/JedWatson/classnames.git"
+    }
+  },
+  {
     "name": "linkifyjs",
     "version": "4.4.0",
     "license": "MIT",
@@ -260,6 +279,57 @@
     }
   },
   {
+    "name": "lodash-es",
+    "version": "4.18.1",
+    "license": "MIT",
+    "repository": "lodash/lodash"
+  },
+  {
+    "name": "mind-elixir",
+    "version": "6.0.3",
+    "license": "MIT",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/SSShooter/mind-elixir-core.git"
+    }
+  },
+  {
+    "name": "mobx",
+    "version": "5.15.7",
+    "license": "MIT",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/mobxjs/mobx.git"
+    }
+  },
+  {
+    "name": "mobx-preact",
+    "version": "3.0.0",
+    "license": "MIT",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/philmander/mobx-preact.git"
+    }
+  },
+  {
+    "name": "mobx-utils",
+    "version": "5.6.2",
+    "license": "MIT",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/mobxjs/mobx-utils.git"
+    }
+  },
+  {
+    "name": "mousetrap",
+    "version": "1.6.5",
+    "license": "Apache-2.0 WITH LLVM-exception",
+    "repository": {
+      "type": "git",
+      "url": "git://github.com/ccampbell/mousetrap.git"
+    }
+  },
+  {
     "name": "orderedmap",
     "version": "2.1.1",
     "license": "MIT",
@@ -267,6 +337,12 @@
       "type": "git",
       "url": "git+https://github.com/marijnh/orderedmap.git"
     }
+  },
+  {
+    "name": "preact",
+    "version": "10.29.8",
+    "license": "MIT",
+    "repository": "preactjs/preact"
   },
   {
     "name": "prosemirror-commands",
@@ -374,6 +450,15 @@
     "repository": {
       "type": "git",
       "url": "git+https://github.com/marijnh/rope-sequence.git"
+    }
+  },
+  {
+    "name": "uuid",
+    "version": "11.1.1",
+    "license": "MIT",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/uuidjs/uuid.git"
     }
   },
   {

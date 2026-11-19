@@ -4,6 +4,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const result=await build({absWorkingDir:root,entryPoints:['editor-entry.js'],bundle:true,format:'esm',minify:true,outfile:'dist/vendor/editor-entry.js',metafile:true,legalComments:'linked'});
+await fs.copyFile(path.join(root,'node_modules','mind-elixir','dist','MindElixir.css'),path.join(root,'dist','vendor','mindmap.css'));
+await fs.copyFile(path.join(root,'node_modules','@logicflow','core','lib','index.css'),path.join(root,'dist','vendor','flowchart.css'));
 const packages=new Set();
 for(const input of Object.keys(result.metafile.inputs)){const match=input.replaceAll('\\','/').match(/^node_modules\/(@[^/]+\/[^/]+|[^/]+)/);if(match)packages.add(match[1]);}
 const target=path.join(root,'dist','licenses','editor');await fs.mkdir(target,{recursive:true});

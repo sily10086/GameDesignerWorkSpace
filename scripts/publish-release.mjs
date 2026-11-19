@@ -18,7 +18,7 @@ const pkg=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8')),v
 const manifest=JSON.parse(await fs.readFile(path.join(artifacts,'update-manifest.json'),'utf8'));
 if(manifest.version!==version||manifest.repository!==repository)throw new Error('Release manifest does not match source version.');
 for(const asset of [manifest.installer,manifest.portable]){const data=await fs.readFile(path.join(artifacts,asset.name));if(data.length!==asset.size||createHash('sha256').update(data).digest('hex')!==asset.sha256)throw new Error('Release asset changed after validation.');}
-const repo=await request(api);if(!repo.permissions?.push)throw new Error('Authenticated GitHub account cannot write to the release repository.');
+const repo=await request(api);if(repo.full_name!==repository)throw new Error('Unexpected publishing repository.');
 const commit=(await run('git',['rev-parse','HEAD'],{cwd:root,windowsHide:true})).stdout.trim();
 let release=await request(api+'/releases/tags/'+tag);
 if(!release.notFound&&!release.draft){if(process.env.GITHUB_ACTIONS==='true'){console.log('Version already published; keeping existing immutable release: '+release.html_url);process.exit(0);}throw new Error('此版本已经发布，请提升版本号后再发布。');}

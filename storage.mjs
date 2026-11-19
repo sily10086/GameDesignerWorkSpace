@@ -4,6 +4,16 @@ import {createHash,randomUUID} from 'node:crypto';
 import {validateWorkspace,collectionNames} from './dist/project-model.js';
 
 const MAX_BYTES=50*1024*1024;
+export const MAX_IMAGE_BYTES=20*1024*1024;
+export function detectImage(data){
+  if(!Buffer.isBuffer(data)||!data.length||data.length>MAX_IMAGE_BYTES)throw new StorageError('请选择 20 MB 以内的图片。',413);
+  if(data.length>=24&&data.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))return {extension:'png',mime:'image/png'};
+  if(data.length>=4&&data[0]===255&&data[1]===216&&data[2]===255)return {extension:'jpg',mime:'image/jpeg'};
+  if(data.length>=13&&['GIF87a','GIF89a'].includes(data.toString('ascii',0,6)))return {extension:'gif',mime:'image/gif'};
+  if(data.length>=16&&data.toString('ascii',0,4)==='RIFF'&&data.toString('ascii',8,12)==='WEBP')return {extension:'webp',mime:'image/webp'};
+  if(data.length>=24&&data.toString('ascii',4,8)==='ftyp'&&['avif','avis'].some(brand=>data.subarray(8,Math.min(data.length,64)).includes(Buffer.from(brand))))return {extension:'avif',mime:'image/avif'};
+  throw new StorageError('请选择 PNG、JPG、GIF、WebP 或 AVIF 图片。',415);
+}
 const safeId=id=>typeof id==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id);
 const sortObject=value=>Array.isArray(value)?value.map(sortObject):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,sortObject(value[k])])):value;
 export const json=value=>JSON.stringify(sortObject(value),null,2)+'\n';
@@ -50,6 +60,9 @@ export class ProjectStore {
           if(docEntry.name.startsWith('.'))continue;
           if(!docEntry.isDirectory()||!safeId(docEntry.name))throw new StorageError('文档目录无效：'+docEntry.name,409);
           const docFolder=path.join(folder,'docs',docEntry.name);await this.assertNoSymlink(docFolder);
+          const docFiles=await this.entries(docFolder);
+          // Recycled documents retain their own images for undo/restore. They are not active documents.
+          if(docFiles.length===1&&docFiles[0].name==='Image'&&docFiles[0].isDirectory())continue;
           const doc=await this.object(path.join(docFolder,'document.json'));
           if(doc.id!==docEntry.name)throw new StorageError('文档目录与 ID 不一致。',409);
           doc.content=await this.text(path.join(docFolder,'content.md'));doc.diagrams=[];
@@ -81,6 +94,27 @@ export class ProjectStore {
   async saveRegistry(){await this.atomic(path.join(this.privateDirectory,'library.json'),json({version:1,projects:this.registry,hiddenLegacy:[...this.suppressedLegacy]}));}
   async detach(id){if(!safeId(id))throw new StorageError('项目 ID 无效。');this.registry=this.registry.filter(item=>item.id!==id);this.mounts.delete(id);this.suppressedLegacy.add(id);await this.saveRegistry();return {message:'仅移除了本机项目关联，项目文件和仓库保持不动。'};}
   getLocation(id){if(!safeId(id))throw new StorageError('项目 ID 无效。');return this.mounts.get(id)||path.join(this.directory,id);}
+  async documentImageFolder(id,docId){
+    if(!safeId(id)||!safeId(docId))throw new StorageError('项目或文档 ID 无效。');
+    const directory=this.getLocation(id),metadata=path.join(directory,'project.json');await this.checkParents(metadata);
+    const project=await this.object(metadata);if(project.id!==id||project.deletedAt)throw new StorageError('项目不存在。',404);
+    const document=path.join(directory,'docs',docId,'document.json');await this.checkParents(document);
+    const doc=await this.object(document);if(doc.id!==docId)throw new StorageError('文档不存在。',404);
+    return path.join(directory,'docs',docId,'Image');
+  }
+  async writeDocumentImage(id,docId,data){
+    const {extension,mime}=detectImage(data),folder=await this.documentImageFolder(id,docId);
+    const name=createHash('sha256').update(data).digest('hex')+'.'+extension,file=path.join(folder,name);
+    await this.checkParents(file);await fs.mkdir(folder,{recursive:true});
+    try{await fs.writeFile(file,data,{flag:'wx'});}catch(error){if(error.code!=='EEXIST')throw error;const current=await fs.readFile(file);if(!current.equals(data))throw new StorageError('图片文件发生冲突，未覆盖。',409);}
+    return {name,source:'Image/'+name,mime,size:data.length};
+  }
+  async readDocumentImage(id,docId,name){
+    if(typeof name!=='string'||!name||name==='.'||name==='..'||/[\\/\x00-\x1f:]/.test(name))throw new StorageError('图片路径无效。');
+    const folder=await this.documentImageFolder(id,docId),file=path.join(folder,name);await this.checkParents(file);
+    const stat=await fs.stat(file);if(!stat.isFile()||stat.size>MAX_BYTES)throw new StorageError('图片不存在或过大。',404);
+    return {file,data:await fs.readFile(file)};
+  }
   async attachment(id,relative){
     if(!safeId(id)||typeof relative!=='string'||relative.split('/').some(part=>!part||part==='.'||part==='..'||/[\\\x00-\x1f:]/.test(part)))throw new StorageError('附件路径无效。',400);
     const directory=this.getLocation(id);const project=await this.object(path.join(directory,'project.json'));

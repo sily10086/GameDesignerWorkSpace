@@ -1,4 +1,6 @@
-import {Editor,mergeAttributes} from '@tiptap/core';
+import {Editor,Extension,mergeAttributes} from '@tiptap/core';
+import {Plugin,PluginKey} from '@tiptap/pm/state';
+import {Decoration,DecorationSet} from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
 import {Markdown} from '@tiptap/markdown';
 import {TableKit,Table} from '@tiptap/extension-table';
@@ -6,6 +8,9 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Placeholder from '@tiptap/extension-placeholder';
 import Image from '@tiptap/extension-image';
+import {documentDiagramExtension} from './diagram-block.js';
+export {mountVisualMindmap} from './mindmap-entry.js';
+export {mountVisualFlowchart} from './flowchart-entry.js';
 
 const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const insertions=[
@@ -20,7 +25,8 @@ const insertions=[
   ['blockquote','提示引用','设计结论与注意事项','❝','quote yy'],
   ['codeBlock','代码块','配置、伪代码与示例','</>','code dm'],
   ['horizontalRule','分割线','分隔不同内容','—','divider fgx'],
-  ['image','图片链接','插入可访问的图片地址','▧','image tp'],
+  ['image','图片','从电脑选择，也可粘贴或拖入','▧','image tp'],
+  ['imageLink','网络图片','通过图片地址插入','↗','image url'],
   ['mindmap','思维导图','梳理系统与玩法结构','◇','mind swdt'],
   ['flowchart','流程图','描述玩法与判断分支','⑂','flow lct'],
 ];
@@ -46,9 +52,11 @@ export function composerMarkup(){return `
     ${tool('undo','撤销','↶')}${tool('redo','重做','↷')}<i></i>
     <select aria-label="段落样式" id="rich-heading"><option value="paragraph">正文</option><option value="h1">一级标题</option><option value="h2">二级标题</option><option value="h3">三级标题</option></select><i></i>
     ${tool('bold','加粗（Ctrl+B）','<b>B</b>')}${tool('italic','斜体（Ctrl+I）','<em>I</em>')}${tool('strike','删除线','<s>S</s>')}${tool('code','行内代码','&lt;/&gt;')}${tool('link','插入链接','↗')}<i></i>
-    ${tool('bulletList','无序列表','≡')}${tool('taskList','待办清单','☑')}${tool('insert','插入内容块','＋ 插入')}
+    ${tool('bulletList','无序列表','≡')}${tool('taskList','待办清单','☑')}${tool('image','插入图片','▧')}${tool('insert','插入内容块','＋ 插入')}
     <span class="rich-toolbar-spacer"></span>${tool('find','查找正文','⌕')}${tool('outline','文档大纲','☷')}${tool('source','Markdown 源码','MD')}${tool('read','阅读模式','◉')}
   </div>
+  <input id="doc-image-files" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" multiple hidden aria-label="选择文档图片">
+  <div class="rich-upload-status" role="status" hidden></div>
   <div class="rich-find" hidden><input id="rich-find-input" aria-label="查找正文内容" placeholder="查找正文内容"><span id="rich-find-count"></span>${tool('findNext','下一个匹配','↓')}${tool('closeFind','关闭查找','×')}</div>
   <div class="rich-workspace"><aside class="rich-outline" aria-label="文档大纲" hidden><div>文档大纲</div><nav id="rich-outline-items"></nav></aside>
     <div class="rich-document"><div id="rich-editor" class="rich-editor"></div><textarea id="doc-content" class="rich-source" aria-label="Markdown 正文源码" spellcheck="false" hidden></textarea></div>
@@ -59,27 +67,53 @@ export function composerMarkup(){return `
   <div class="rich-table-tools" hidden><span>表格</span>${tool('addRowAfter','下方加一行','＋ 行')}${tool('addColumnAfter','右侧加一列','＋ 列')}${tool('deleteRow','删除当前行','− 行')}${tool('deleteColumn','删除当前列','− 列')}${tool('deleteTable','删除整个表格','删除表格')}</div>
   <div class="rich-writing-hint"><span id="rich-mode-hint">输入 / 快速插入 · 选中文字设置格式</span><span id="rich-word-count"></span></div>`;}
 
-export function attachmentImageURL(src,projectId){
+export function attachmentImageURL(src,projectId,docId){
+  if(src.startsWith('Image/')){
+    if(!/^[A-Za-z0-9_-]+$/.test(projectId||'')||!/^[A-Za-z0-9_-]+$/.test(docId||''))return src;
+    let name;try{name=decodeURIComponent(src.slice(6));}catch{return '';}
+    if(!name||name==='.'||name==='..'||/[\\/\x00-\x1f:]/.test(name))return '';
+    return '/api/projects/'+projectId+'/docs/'+docId+'/images/'+encodeURIComponent(name);
+  }
   if(!projectId||!/^attachments\//.test(src)||!/^[A-Za-z0-9_-]+$/.test(projectId))return src;
   const parts=src.slice(12).split('/').map(part=>{try{return decodeURIComponent(part);}catch{return '';}});
   if(parts.some(part=>!part||part==='.'||part==='..'||/[\\\x00-\x1f]/.test(part)))return '';
   return '/api/projects/'+projectId+'/attachments/'+parts.map(encodeURIComponent).join('/');
 }
-export function editorExtensions({projectId}={}){const ProjectImage=Image.extend({renderHTML({HTMLAttributes}){return ['img',mergeAttributes(this.options.HTMLAttributes,HTMLAttributes,{src:attachmentImageURL(HTMLAttributes.src||'',projectId)})];}});return [StarterKit.configure({link:{openOnClick:false,autolink:true,protocols:['http','https','mailto']}}),TableKit.configure({table:false}),MarkdownTable.configure({resizable:false}),TaskList,TaskItem.configure({nested:true}),ProjectImage.configure({allowBase64:false}),Markdown.configure({markedOptions:{gfm:true}}),Placeholder.configure({placeholder:'写下你的设计，或输入 / 插入内容…'})];}
+const uploadPlaceholderKey=new PluginKey('document-image-upload');
+const ImageUploads=Extension.create({name:'documentImageUploads',addProseMirrorPlugins(){return [new Plugin({key:uploadPlaceholderKey,state:{init:()=>DecorationSet.empty,apply(tr,previous){let set=previous.map(tr.mapping,tr.doc);const action=tr.getMeta(uploadPlaceholderKey);if(action?.add)set=set.add(tr.doc,[Decoration.widget(action.pos,()=>{const el=document.createElement('span');el.className='image-upload-placeholder';el.textContent='正在插入图片…';return el;},{id:action.id,side:-1})]);if(action?.remove)set=set.remove(set.find(undefined,undefined,item=>item.id===action.id));return set;}},props:{decorations:state=>uploadPlaceholderKey.getState(state)}})];}});
+export function editorExtensions({projectId,docId,...diagramOptions}={}){const ProjectImage=Image.extend({renderHTML({HTMLAttributes}){return ['img',mergeAttributes(this.options.HTMLAttributes,HTMLAttributes,{src:attachmentImageURL(HTMLAttributes.src||'',projectId,docId)})];}});return [StarterKit.configure({link:{openOnClick:false,autolink:true,protocols:['http','https','mailto']}}),TableKit.configure({table:false}),MarkdownTable.configure({resizable:false}),TaskList,TaskItem.configure({nested:true}),ProjectImage.configure({allowBase64:false}),ImageUploads,documentDiagramExtension(diagramOptions),Markdown.configure({markedOptions:{gfm:true}}),Placeholder.configure({placeholder:'写下你的设计，或输入 / 插入内容…'})];}
 
-export function mountComposer(root,{content,projectId,onChange,onDiagram,onError=console.error}){
+export function mountComposer(root,{content,projectId,docId,uploadImage,onChange,onDiagram,resolveDiagram,onDiagramChange,onOpenDiagram,onRenderFlow,onError=console.error}){
   const controller=new AbortController(),listen=(node,event,callback)=>node.addEventListener(event,callback,{signal:controller.signal});
   const $=selector=>root.querySelector(selector),menu=$('.rich-insert-menu'),bubble=$('.rich-bubble'),source=$('#doc-content');
   let sourceMode=false,readOnly=false,slash=null,menuIndex=0,menuItems=insertions,findIndex=-1,findMatches=[],frame=0,original=content,linkKind='link';
+  const uploads=new Set(),blockViews=new Set();let destroyed=false;
+  const imageFiles=transfer=>[...(transfer?.files||[])].filter(file=>file.type.startsWith('image/'));
   const rich=new Editor({
     element:$('#rich-editor'),
-    extensions:editorExtensions({projectId}),
+    extensions:editorExtensions({projectId,docId,resolveDiagram,onDiagramChange,onOpenDiagram,onRenderFlow,onError,onBlockView:(view,add)=>add?blockViews.add(view):blockViews.delete(view)}),
     content,contentType:'markdown',
-    editorProps:{attributes:{role:'textbox','aria-label':'文档正文','aria-multiline':'true',spellcheck:'false'},handleKeyDown:(_view,event)=>handleKey(event)},
+    editorProps:{attributes:{role:'textbox','aria-label':'文档正文','aria-multiline':'true',spellcheck:'false'},handleKeyDown:(_view,event)=>handleKey(event),handlePaste:(_view,event)=>{const files=imageFiles(event.clipboardData);if(!files.length||sourceMode||readOnly)return false;event.preventDefault();queueImages(files);return true;},handleDrop:(view,event,moved)=>{const files=imageFiles(event.dataTransfer);if(moved||!files.length||sourceMode||readOnly)return false;event.preventDefault();queueImages(files,view.posAtCoords({left:event.clientX,top:event.clientY})?.pos);return true;}},
     onUpdate:()=>{try{original=rich.getMarkdown();onChange(original);update();updateSlash();}catch(error){onError(error);}},
     onSelectionUpdate:()=>{update();updateSlash();},
   });
   source.value=content;
+  function queueImages(files,position=rich.state.selection.from){
+    if(!files.length||sourceMode||readOnly)return;
+    const id=crypto.randomUUID();rich.view.dispatch(rich.state.tr.setMeta(uploadPlaceholderKey,{add:true,id,pos:position}));
+    const task=Promise.resolve().then(async()=>{const nodes=[];try{
+      for(const file of files){
+        if(destroyed)break;
+        $('.rich-upload-status').hidden=false;$('.rich-upload-status').textContent='正在保存图片 · '+file.name;
+        try{if(file.size>20*1024*1024)throw new Error('图片不能超过 20 MB。');if(!uploadImage)throw new Error('图片上传不可用，请刷新工作台。');const result=await uploadImage(file,{signal:controller.signal});nodes.push({type:'image',attrs:{src:result.source,alt:file.name.replace(/[\[\]"\r\n]/g,'').slice(0,180)||'图片'}});}catch(error){if(!destroyed)onError(new Error(file.name+'：'+error.message));}
+      }
+      if(destroyed)return;const found=uploadPlaceholderKey.getState(rich.state).find(undefined,undefined,spec=>spec.id===id);const pos=found[0]?.from;
+      rich.view.dispatch(rich.state.tr.setMeta(uploadPlaceholderKey,{remove:true,id}));
+      if(nodes.length&&pos!==undefined)rich.chain().insertContentAt(pos,[...nodes,{type:'paragraph'}]).run();
+      else if(nodes.length)onError(new Error('原插入位置已被删除，请重新插入图片。'));
+    }finally{uploads.delete(task);if(!destroyed){$('.rich-upload-status').hidden=uploads.size===0;update();}}});
+    uploads.add(task);update();
+  }
   function hideMenu(){menu.hidden=true;slash=null;}
   function positionMenu(coords){menu.style.left=Math.min(window.innerWidth-302,Math.max(root.getBoundingClientRect().left+12,coords.left))+'px';menu.style.top=Math.max(70,Math.min(window.innerHeight-345,coords.bottom+8))+'px';}
   function showMenu(query=''){
@@ -107,8 +141,8 @@ export function mountComposer(root,{content,projectId,onChange,onDiagram,onError
   }
   function insert(kind){
     const range=slash;hideMenu();let chain=rich.chain().focus();if(range)chain=chain.deleteRange(range);chain.run();
-    if(kind==='mindmap'||kind==='flowchart'){onDiagram(kind);return;}
-    if(kind==='image'){command('image');return;}
+    if(kind==='mindmap'||kind==='flowchart'){const diagram=onDiagram(kind);if(diagram)rich.chain().focus().insertContent({type:'designDiagram',attrs:{id:diagram.id}}).run();return;}
+    if(kind==='image'||kind==='imageLink'){command(kind);return;}
     const c=rich.chain().focus();
     if(/^h[123]$/.test(kind))c.setHeading({level:Number(kind[1])}).run();
     else if(kind==='paragraph')c.setParagraph().run();
@@ -118,20 +152,22 @@ export function mountComposer(root,{content,projectId,onChange,onDiagram,onError
     update();
   }
   function command(name){
+    if(uploads.size&&['source','read'].includes(name)){onError(new Error('图片正在插入，请稍候。'));return;}
     if(name==='source'){
       sourceMode=!sourceMode;hideMenu();bubble.hidden=true;$('.rich-link-form').hidden=true;
       if(sourceMode){source.value=original;}else{rich.commands.setContent(source.value,{contentType:'markdown',emitUpdate:false});}
       $('#rich-editor').hidden=sourceMode;source.hidden=!sourceMode;$('.rich-outline').hidden=true;$('.rich-table-tools').hidden=true;
       source.readOnly=readOnly;$('#rich-mode-hint').textContent=sourceMode?'Markdown 源码 · 自动保存到项目':'输入 / 快速插入 · 选中文字设置格式';update();return;
     }
-    if(name==='read'){readOnly=!readOnly;rich.setEditable(!readOnly);source.readOnly=readOnly;root.classList.toggle('is-reading',readOnly);hideMenu();bubble.hidden=true;update();return;}
+    if(name==='read'){readOnly=!readOnly;rich.setEditable(!readOnly);source.readOnly=readOnly;for(const view of blockViews)view.setReadOnly(readOnly);root.classList.toggle('is-reading',readOnly);hideMenu();bubble.hidden=true;update();return;}
     if(name==='outline'){$('.rich-outline').hidden=!$('.rich-outline').hidden;updateOutline();return;}
     if(name==='find'){$('.rich-find').hidden=false;$('#rich-find-input').focus();return;}
     if(name==='closeFind'){$('.rich-find').hidden=true;return;}
     if(name==='findNext'){findNext();return;}
     if(sourceMode||readOnly)return;
     if(name==='insert'){slash=null;showMenu();positionMenu(rich.view.coordsAtPos(rich.state.selection.from));return;}
-    if(name==='link'||name==='image'){linkKind=name;$('.rich-link-form').hidden=false;$('.rich-link-form label').textContent=name==='image'?'图片地址（http / https）':'链接地址';root.querySelector('[data-rich-command=unlink]').hidden=name==='image';$('#rich-link-url').value=name==='image'?'':rich.getAttributes('link').href||'';$('#rich-link-url').focus();bubble.hidden=true;return;}
+    if(name==='image'){$('#doc-image-files').click();return;}
+    if(name==='link'||name==='imageLink'){linkKind=name;$('.rich-link-form').hidden=false;$('.rich-link-form label').textContent=name==='imageLink'?'图片地址（http / https）':'链接地址';root.querySelector('[data-rich-command=unlink]').hidden=name==='imageLink';$('#rich-link-url').value=name==='imageLink'?'':rich.getAttributes('link').href||'';$('#rich-link-url').focus();bubble.hidden=true;return;}
     if(name==='unlink'){rich.chain().focus().extendMarkRange('link').unsetLink().run();$('.rich-link-form').hidden=true;return;}
     const c=rich.chain().focus();
     const toggles={bold:'toggleBold',italic:'toggleItalic',strike:'toggleStrike',code:'toggleCode',bulletList:'toggleBulletList',taskList:'toggleTaskList'};
@@ -164,13 +200,14 @@ export function mountComposer(root,{content,projectId,onChange,onDiagram,onError
     try{if(button.dataset.richCommand)command(button.dataset.richCommand);else if(button.dataset.richInsert)insert(button.dataset.richInsert);else{rich.commands.setTextSelection(Number(button.dataset.richHeading)+1);rich.view.nodeDOM(Number(button.dataset.richHeading))?.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});}}catch(error){onError(error);}
   });
   listen($('#rich-heading'),'change',event=>insert(event.target.value));
+  listen($('#doc-image-files'),'change',event=>{queueImages([...event.target.files]);event.target.value='';});
   listen(source,'input',()=>{original=source.value;onChange(original);update();});
   listen($('#rich-find-input'),'input',()=>{findIndex=-1;findNext();$('#rich-find-input').focus();});
-  listen($('.rich-link-form'),'submit',event=>{event.preventDefault();const url=$('#rich-link-url').value.trim();if(!(linkKind==='image'?/^https?:\/\//i:/^(https?:\/\/|mailto:)/i).test(url)){onError(new Error('请输入有效的 http / https 地址。'));return;}if(linkKind==='image')rich.chain().focus().setImage({src:url,alt:'设计参考图'}).run();else{const c=rich.chain().focus().extendMarkRange('link');if(rich.state.selection.empty&&!rich.isActive('link'))c.insertContent({type:'text',text:url,marks:[{type:'link',attrs:{href:url}}]}).run();else c.setLink({href:url}).run();}$('.rich-link-form').hidden=true;});
+  listen($('.rich-link-form'),'submit',event=>{event.preventDefault();const url=$('#rich-link-url').value.trim();if(!(linkKind==='imageLink'?/^https?:\/\//i:/^(https?:\/\/|mailto:)/i).test(url)){onError(new Error('请输入有效的 http / https 地址。'));return;}if(linkKind==='imageLink')rich.chain().focus().setImage({src:url,alt:'设计参考图'}).run();else{const c=rich.chain().focus().extendMarkRange('link');if(rich.state.selection.empty&&!rich.isActive('link'))c.insertContent({type:'text',text:url,marks:[{type:'link',attrs:{href:url}}]}).run();else c.setLink({href:url}).run();}$('.rich-link-form').hidden=true;});
   listen(document,'pointerdown',event=>{if(!root.contains(event.target)){hideMenu();bubble.hidden=true;}});
   listen(root,'keydown',event=>{if(event.key==='Escape'&&(!menu.hidden||!$('.rich-link-form').hidden||!$('.rich-find').hidden)){hideMenu();$('.rich-link-form').hidden=true;$('.rich-find').hidden=true;event.stopPropagation();event.preventDefault();}});
   // Keep uncommon raw HTML and comments available verbatim in the source view.
   if(/<!--|<(?:details|summary|iframe|script|style|div|span|table)\b/i.test(content)){command('source');$('#rich-mode-hint').textContent='此文档包含 HTML，已保留源码编辑，避免格式丢失。';}
   update();
-  return {destroy(){cancelAnimationFrame(frame);controller.abort();rich.destroy();},getMarkdown:()=>original,focus:()=>sourceMode?source.focus():rich.commands.focus()};
+  return {destroy(){destroyed=true;cancelAnimationFrame(frame);controller.abort();rich.destroy();},get pendingImages(){return uploads.size;},flushImages:()=>Promise.all([...uploads]),flushBlocks(){for(const view of blockViews)view.flush();},getMarkdown:()=>original,focus:()=>sourceMode?source.focus():rich.commands.focus()};
 }

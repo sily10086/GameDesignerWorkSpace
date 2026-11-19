@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {ProjectStore,StorageError} from './storage.mjs';
+import {ProjectStore,StorageError,MAX_IMAGE_BYTES} from './storage.mjs';
 import {RepositoryManager} from './vcs.mjs';
 import {toolStatus} from './runtime-tools.mjs';
 import {checkForUpdates,openUpdater} from './updates.mjs';
@@ -24,6 +24,21 @@ export async function createServer({root=appRoot,dataDirectory=process.env.GDWS_
   if(req.headers.origin&&req.headers.origin!==`http://${host}`)throw new StorageError('不允许跨站写入项目文件。',403);
   const pathname=decodeURIComponent(new URL(req.url,'http://'+host).pathname);
   if(pathname.startsWith('/api/')){
+   const documentImageRoute=pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]+)\/docs\/([A-Za-z0-9_-]+)\/images(?:\/([^/]+))?$/);
+   if(documentImageRoute){const [,id,docId,name]=documentImageRoute;
+    try{
+     if(req.method==='POST'&&!name){
+      if(!/^image\/(png|jpeg|gif|webp|avif)(?:;|$)/i.test(req.headers['content-type']||''))throw new StorageError('请选择支持的图片文件。',415);
+      const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>MAX_IMAGE_BYTES)throw new StorageError('图片超过 20 MB。',413);chunks.push(chunk);}
+      return send(res,201,await store.serialize(()=>store.writeDocumentImage(id,docId,Buffer.concat(chunks))));
+     }
+     if(name&&(req.method==='GET'||req.method==='HEAD')){
+      const mime={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif'}[path.extname(name).toLowerCase()];if(!mime)throw new StorageError('不支持此图片类型。',415);
+      const image=await store.serialize(()=>store.readDocumentImage(id,docId,name));res.writeHead(200,{'Content-Type':mime,'Content-Length':image.data.length,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'same-origin'});return res.end(req.method==='HEAD'?undefined:image.data);
+     }
+     return send(res,405,{error:'不支持此图片请求。'});
+    }catch(error){if(error.code==='ENOENT'||error.code==='ENOTDIR')throw new StorageError('项目、文档或图片不存在。',404);throw error;}
+   }
    const attachmentRoute=pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]+)\/attachments\/(.+)$/);
    if(attachmentRoute&&(req.method==='GET'||req.method==='HEAD')){
     const imageTypes={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif'};
@@ -50,7 +65,8 @@ export async function createServer({root=appRoot,dataDirectory=process.env.GDWS_
   res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'});res.end(req.method==='HEAD'?undefined:data);
  }catch(e){console.error(e.message);send(res,e.status||500,{error:e instanceof StorageError?e.message:'无法读写 Project 文件夹，请检查权限或磁盘状态。',conflicts:e.details||[]});}});
  server.on('close',()=>void release().catch(console.error));
- return {server,store,repositories,close:async()=>{if(server.listening)await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));await release();}};
+ async function close(){if(server.listening)await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));await release();}
+ return {server,store,repositories,close};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  try{const {server,store,close}=await createServer();server.on('error',async e=>{console.error(e.code==='EADDRINUSE'?'端口 4173 已被占用。请先关闭旧的工作台服务。':e.message);await close();process.exitCode=1;});for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>void close());server.listen(4173,'127.0.0.1',()=>{console.log('Local: http://127.0.0.1:4173');console.log('Project files: '+store.directory);});}catch(e){console.error('工作台启动失败：'+e.message);process.exitCode=1;}

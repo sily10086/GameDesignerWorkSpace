@@ -5,5 +5,7 @@
   "platform": "win32-x64",
   "nodeVersion": "24.15.0",
   "gitVersion": "2.56.1.windows.1",
-  "svnVersion": "1.15.0"
+  "svnVersion": "1.15.0",
+  "giteeRepository": "YuAStudio/game-designer-work-space",
+  "giteeManifestBranch": "updates"
 }

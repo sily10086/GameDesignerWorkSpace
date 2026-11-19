@@ -136,6 +136,37 @@ body.document-fullscreen #app{visibility:hidden}
 .document-fullscreen .rich-writing-hint{max-width:850px;margin:auto;padding:0 50px 25px}
 .document-fullscreen .document-title-bar{padding-left:max(34px,calc((100vw - 750px)/2));padding-right:max(34px,calc((100vw - 750px)/2))}
 .document-panel [hidden]{display:none!important}
+.rich-upload-status{padding:10px 24px;background:#edf6f1;color:#2d735c;font-size:14px;border-bottom:1px solid #d5e6dc}
+.image-upload-placeholder{display:inline-block;padding:10px 16px;margin:8px;border:1px dashed #6c9c87;border-radius:6px;color:#437a62;background:#f1f7f3;font-size:14px}
+.document-diagram-block{margin:24px 0;border:1px solid #dce2e8;border-radius:9px;background:#fff;overflow:hidden;position:relative;line-height:1.4}
+.document-diagram-caption{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:#fafcfd;border-bottom:1px solid #e8edf1;font-size:14px;font-weight:500;color:#495664}
+.document-diagram-caption>div{display:flex;gap:6px;flex-wrap:wrap}
+.document-diagram-caption button,.mindmap-tools button,.mindmap-tools select{border:1px solid #dce3e8;border-radius:5px;padding:6px 9px;background:#fff;color:#34414f;font-size:13px;line-height:1.4;cursor:pointer;white-space:nowrap}
+.document-diagram-caption button:hover,.mindmap-tools button:hover{background:#edf4fa}
+.document-diagram-caption .diagram-advanced{color:#7c8996;font-size:12px}
+.visual-mindmap{height:420px;width:100%;background:#fff;position:relative;overflow:hidden;font-family:inherit;outline:none}
+.visual-mindmap:focus-visible{outline:2px solid #7badd4;outline-offset:-2px}
+.mindmap-tools{display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:8px;background:#fafcfd;border-bottom:1px solid #e9edf1}
+.mindmap-hint{padding:8px 12px;color:#7f8b97;font-size:12px;background:#fafcfd}
+.document-diagram-canvas>svg{display:block;max-width:100%;max-height:500px;margin:auto}
+.document-diagram-block.is-expanded{position:fixed;inset:15px;z-index:3500;margin:0;box-shadow:0 0 0 100vmax #13232d70;display:flex;flex-direction:column}
+.document-diagram-block.is-expanded .document-diagram-canvas{flex:1;min-height:0;display:flex;flex-direction:column}
+.document-diagram-block.is-expanded .visual-mindmap{flex:1;height:auto;min-height:200px}
+.document-diagram-block.is-expanded .document-diagram-canvas>svg{max-height:calc(100vh - 100px);width:100%}
+.visual-map-editor .visual-mindmap{height:550px}
+.rich-editor .tiptap{font-size:16px;line-height:1.8;color:#29323c}
+.rich-editor .tiptap h1{font-size:27px;line-height:1.4}
+.rich-editor .tiptap h2{font-size:22px;line-height:1.5}
+.rich-editor .tiptap h3{font-size:18px;line-height:1.5}
+.rich-toolbar button,.rich-toolbar select{font-size:13px}
+.rich-writing-hint{font-size:12px}
+.rich-editor .tiptap .document-diagram-block p{margin:0;line-height:1.35}
+.visual-mindmap .me-tpc{font-size:15px}
+.visual-flowchart{height:420px;width:100%;position:relative;overflow:hidden;background:#fff;outline:none;font-size:15px}
+.visual-flowchart:focus-visible{outline:2px solid #7badd4;outline-offset:-2px}
+.visual-map-editor .visual-flowchart{height:550px}
+.document-diagram-block.is-expanded .visual-flowchart{height:auto;min-height:200px;flex:1}
+.visual-flowchart .lf-text-input{font-size:15px!important;background:#fff!important;color:#263847!important}
 .document-panel .is-reading .rich-editor .tiptap{caret-color:transparent}
 @media(max-width:800px){.document-panel.modal.editor{width:100vw!important}body.doc-panel-open #app{width:100%}body.doc-panel-open .sidebar{display:none}.document-resizer{display:none}.document-title-bar{padding:22px 23px 16px}.document-title-bar .doc-edit-title{font-size:23px}.document-topbar{padding:0 20px}.rich-toolbar{padding:9px 16px}.rich-document{padding:24px}.rich-toolbar i{margin:0 2px}.document-panel .embedded-diagrams{padding:10px 24px 22px}.document-footer{padding:12px 20px}.document-fullscreen .rich-document{padding:24px}.rich-outline{width:130px;padding-left:15px}.rich-writing-hint{padding:0 24px 20px}.document-fullscreen .document-title-bar{padding:22px 24px 16px}.document-topbar>div:first-child{font-size:10px}}
 @media(prefers-reduced-motion:reduce){#app,.document-panel.modal.editor,.document-resizer span{transition:none!important}}

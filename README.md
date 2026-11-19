@@ -1,4 +1,4 @@
-# GameDesignerWorkerSpace 1.5
+# GameDesignerWorkerSpace 1.6
 
 Windows x64 EXE 网页工作台，安装包自带 Node / Git / SVN。程序与每个游戏项目完全分离。
 
@@ -10,9 +10,9 @@ Windows x64 EXE 网页工作台，安装包自带 Node / Git / SVN。程序与�
 
 ## 工作台更新
 
-项目库「工作台更新」、工作台设置或系统托盘「检查工作台更新」均可检查本仓库的新正式版本。更新程序只更新 EXE、App、Runtime 与 Documents，保留 Project、独立项目、Data 和 Logs；下载包先校验 SHA-256。安装前请保存网页并退出托盘中的工作台服务。
+项目库「工作台更新」、工作台设置或系统托盘「检查工作台更新」同时尝试 GitHub 和 Gitee。任一来源返回有效新版本即可自动下载，失败时切换备用来源。更新程序只更新 EXE、App、Runtime 与 Documents，保留 Project、独立项目、Data 和 Logs；下载包先校验大小和 SHA-256。安装前请保存网页并退出托盘服务，再使用可见安装器完成安装。
 
-首次从旧版升级请下载安装 v1.5.0；之后使用内置更新器。源码提交需发布为正式 Release 才成为可安装更新。详见 [更新与发布说明](UPDATING.md)。
+首次获得双源更新、图片插入和可视化图表功能，请下载安装 v1.6.0；之后使用内置更新器。源码提交需发布为正式 Release 才成为可安装更新。详见 [更新与发布说明](UPDATING.md)。
 
 ## 从源码构建
 
@@ -26,7 +26,11 @@ Windows x64，Node 24.15.0：运行 `npm ci`、`npm run prepare:runtime`、`npm 
 
 输入 `/` 快速插入标题、列表、待办、表格、引用、代码块、分割线、图片链接、思维导图或流程图。选中文字设置格式，标题生成大纲；支持表格增删行列、查找、阅读模式、撤销/重做与 Markdown 源码。正文自动写入项目中的 Markdown，图表保存为 Mermaid，继续通过 Git/SVN 协作。
 
-编辑器与依赖随安装包提供，离线可用。项目内图片放在项目根目录 `attachments/`，Markdown 使用 `![说明](attachments/reference.png)` 相对路径；随项目一起复制或通过 Git/SVN 同步。支持 PNG/JPEG/WebP/GIF/AVIF，单张不超过 50 MB。外部图片链接需要能访问对应地址。文档模块参考飞书的常用写作交互，详见 [文档编辑功能与参考](DOCUMENT_EDITOR_PLAN.md)。
+图片支持工具栏选择、Ctrl+V 粘贴截图和拖入。每篇文档独立保存在 `docs/<文档ID>/`，图片只放该文档的 `Image/`，正文使用 `![说明](Image/文件名.png)` 相对路径。支持 PNG/JPEG/WebP/GIF/AVIF，单张不超过 20 MB。复制或同步文档文件夹时一并包含 Image。
+
+思维导图与流程图可作为正文中的内容块就地编辑或展开。导图默认向右树状，支持双击改文字、Tab 子节点、Enter 同级节点、折叠、缩放、撤销和重做；流程图支持添加步骤/判断/起止节点、拖动布局、锚点连线和文字编辑。图表仍保存为可读的 Mermaid 文本，布局和折叠信息保存在注释中；特殊语法可使用高级源码入口继续编辑。编辑器、画布及许可均随安装包离线提供。
+
+源码同时发布到 [GitHub](https://github.com/sily10086/GameDesignerWorkSpace) 和 [Gitee](https://gitee.com/YuAStudio/game-designer-work-space)。Gitee 的 `updates` 分支只放更新清单与校验文件，安装包放发行版附件；项目资料不进入这两个公开仓库。
 
 ## 项目库与仓库
 

@@ -6,5 +6,11 @@ assert.equal(parseUpdateManifest(manifest,'1.4.0').available,true);assert.equal(
 for(const changed of [{...manifest,managedRoots:['Project']},{...manifest,protectedRoots:[]},{...manifest,installer:{...manifest.installer,url:'https://example.com/update'}},{...manifest,version:'1.5.0-rc1'}])assert.throws(()=>parseUpdateManifest(changed,'1.4.0'));
 const result=await checkForUpdates({version:'1.4.0',fetcher:async()=>({ok:true,status:200,json:async()=>manifest})});assert.ok(result.available);assert.ok(result.protectedDirectories.includes('Project'));assert.ok(!result.managedDirectories.includes('Project'));
 const unpublished=await checkForUpdates({version:'1.5.0',fetcher:async()=>({ok:false,status:404})});assert.ok(unpublished.unpublished&&!unpublished.available);
-await assert.rejects(checkForUpdates({version:'1.5.0',fetcher:async()=>({ok:false,status:429})}),/限制/);
+await assert.rejects(checkForUpdates({version:'1.5.0',fetcher:async()=>({ok:false,status:429})}),/GitHub 和 Gitee/);
+const response=value=>({ok:true,status:200,json:async()=>value});
+const mirrored={...manifest,installer:{...manifest.installer,mirrors:['https://gitee.com/YuAStudio/game-designer-work-space/releases/download/v1.5.0/'+manifest.installer.name]}};
+const fallback=await checkForUpdates({version:'1.4.0',fetcher:async url=>{if(url.startsWith('https://github.com'))throw new Error('offline');return response(mirrored);}});assert.equal(fallback.source,'gitee');assert.equal(fallback.available,true);
+const newerGitee={...mirrored,version:'1.6.0',installer:{...mirrored.installer,name:'GameDesignerWorkerSpace-Setup-1.6.0-x64.exe',url:base+'download/v1.6.0/GameDesignerWorkerSpace-Setup-1.6.0-x64.exe',mirrors:['https://gitee.com/YuAStudio/game-designer-work-space/releases/download/v1.6.0/GameDesignerWorkerSpace-Setup-1.6.0-x64.exe']}};
+const advanced=await checkForUpdates({version:'1.5.0',fetcher:async url=>response(url.startsWith('https://github.com')?manifest:newerGitee)});assert.equal(advanced.latestVersion,'1.6.0');assert.equal(advanced.source,'gitee');
+assert.throws(()=>parseUpdateManifest({...mirrored,installer:{...mirrored.installer,mirrors:['https://gitee.com/other/project/releases/download/v1.5.0/'+manifest.installer.name]}},'1.4.0'),/镜像/);
 console.log('PASS: updater stable-version comparisons, official repository links, project exclusion, missing releases and network-limit handling.');
