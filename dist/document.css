@@ -95,6 +95,14 @@ body.document-fullscreen #app{visibility:hidden}
 .rich-editor .tiptap li[data-type=taskItem]>div{flex:1;min-width:0}
 .rich-editor .tiptap li[data-checked=true]>div>p{color:#a1ac9b;text-decoration:line-through}
 .rich-editor .tiptap table{border-collapse:collapse;width:100%;table-layout:fixed;margin:18px 0;font-size:12px}
+/* 表格边缘快捷加行/加列按钮：贴在表格右上与左下，点击直接增列/增行 */
+.rich-editor .tiptap .tableWrapper{position:relative}
+.rich-editor .gd-table-add{position:absolute;width:20px;height:20px;padding:0;line-height:18px;text-align:center;font-size:14px;cursor:pointer;color:#3f6e42;background:#e8f3e6;border:1px solid #9dbb8f;border-radius:4px;z-index:3;user-select:none}
+.rich-editor .gd-table-add:hover{background:#cfe6c9;border-color:#6f9c63}
+.rich-editor .gd-table-add:active{background:#b9d9ae}
+.rich-editor .gd-table-add.gd-add-col{right:-11px;top:-11px}
+.rich-editor .gd-table-add.gd-add-row{left:-11px;bottom:-11px}
+.rich-editor.is-reading .gd-table-add{display:none}
 .rich-editor .tiptap td,.rich-editor .tiptap th{border:1px solid #dfe7dc;padding:8px 10px;min-width:45px;vertical-align:top;position:relative;font-weight:400}
 .rich-editor .tiptap th{background:#f0f5ed;font-weight:600}
 .rich-editor .tiptap td p,.rich-editor .tiptap th p{margin:0;min-height:24px}
