@@ -80,17 +80,19 @@ try{
  // 参考图按内容哈希命名（同图不重复存），彻底删除任务时整个 tasks/<id>/ 目录连同图片一起消失。
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jK1sAAAAASUVORK5CYII=','base64');
  const taskBase=await store.load(),withAcceptance=copy(taskBase),target=withAcceptance.projects[0].tasks[0];
- target.acceptance=[{id:randomUUID(),text:'能跑通',desc:'第一行\n第二行',done:true},{id:randomUUID(),text:'',desc:'只有描述也算一条',done:false}];
+ target.acceptance=[{id:randomUUID(),text:'能跑通',desc:'第一行\n第二行',done:true,images:[{name:'acc-one.png',size:png.length}]},{id:randomUUID(),text:'',desc:'只有描述也算一条',done:false}];
  target.images=[{name:'pending.png',size:png.length}];
  await store.save(taskBase,withAcceptance);
  const acceptanceBack=(await new ProjectStore(root).load()).projects[0].tasks.find(t=>t.id===target.id);
- assert.deepEqual(acceptanceBack.acceptance,target.acceptance,'验收清单必须完整往返（含换行与空标题）');
+ assert.deepEqual(acceptanceBack.acceptance,target.acceptance,'验收清单必须完整往返（含换行、空标题和每条的参考图）');
  assert.deepEqual(acceptanceBack.images,target.images,'参考图清单必须完整往返');
  const legacyTask=copy(taskBase.projects[0].tasks[1]);delete legacyTask.acceptance;delete legacyTask.images;
  const legacyState=copy(taskBase);legacyState.projects[0].tasks[1]=legacyTask;await store.save(taskBase,legacyState);
  assert.equal((await new ProjectStore(root).load()).projects[0].tasks[1].id,legacyTask.id,'缺新字段的老任务必须仍可读');
  const brokenState=copy(await store.load());brokenState.projects[0].tasks[0].acceptance=[{id:randomUUID(),text:'缺 done 字段',desc:''}];
  await assert.rejects(store.save(await store.load(),brokenState),e=>e.status===400,'验收清单结构不合法必须拒绝写入');
+ const brokenImages=copy(await store.load());brokenImages.projects[0].tasks[0].acceptance=[{id:randomUUID(),text:'图名不合法',desc:'',done:false,images:[{name:'../evil.png',size:1}]}];
+ await assert.rejects(store.save(await store.load(),brokenImages),e=>e.status===400,'验收项里的图片名不合法必须拒绝写入');
  const imageProject=await store.load(),imageTask=imageProject.projects[0].tasks[0];
  const written=await store.writeTaskImage(imageProject.projects[0].id,imageTask.id,png);
  assert.match(written.name,/^[a-f0-9]{32}\.png$/);assert.equal(written.mime,'image/png');
