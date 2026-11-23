@@ -54,6 +54,22 @@ export async function createServer({root=appRoot,dataDirectory=process.env.GDWS_
    if(pathname==='/api/tools'&&req.method==='GET')return send(res,200,await toolStatus());
    if(pathname==='/api/projects/link'&&req.method==='POST'){const body=await readBody(req);return send(res,200,await store.serialize(()=>repositories.importLink(body)));}
    if(pathname==='/api/projects/attach'&&req.method==='POST'){const body=await readBody(req);return send(res,200,await store.serialize(()=>repositories.attach(body.directory,Boolean(body.replace))));}
+   const taskImageRoute=pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]+)\/tasks\/([A-Za-z0-9_-]+)\/images(?:\/([^/]+))?$/);
+   if(taskImageRoute){const [,id,taskId,name]=taskImageRoute;
+    try{
+     if(req.method==='POST'&&!name){
+      if(!/^image\/(png|jpeg|gif|webp|avif)(?:;|$)/i.test(req.headers['content-type']||''))throw new StorageError('请选择支持的图片文件。',415);
+      const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>MAX_IMAGE_BYTES)throw new StorageError('图片超过 20 MB。',413);chunks.push(chunk);}
+      return send(res,201,await store.serialize(()=>store.writeTaskImage(id,taskId,Buffer.concat(chunks))));
+     }
+     if(name&&(req.method==='GET'||req.method==='HEAD')){
+      const mime={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif'}[path.extname(name).toLowerCase()];if(!mime)throw new StorageError('不支持此图片类型。',415);
+      const image=await store.serialize(()=>store.readTaskImage(id,taskId,name));res.writeHead(200,{'Content-Type':mime,'Content-Length':image.data.length,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'same-origin'});return res.end(req.method==='HEAD'?undefined:image.data);
+     }
+     if(name&&req.method==='DELETE')return send(res,200,await store.serialize(()=>store.deleteTaskImage(id,taskId,name)));
+     return send(res,405,{error:'不支持此任务图片请求。'});
+    }catch(error){if(error.code==='ENOENT'||error.code==='ENOTDIR')throw new StorageError('项目或图片不存在。',404);throw error;}
+   }
    const numericRoute=pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]+)\/numerics(?:\/([A-Za-z0-9_-]+)(\/preview|\/open)?)?$/);
    if(numericRoute){const [,id,rid,op]=numericRoute;
     if(req.method==='POST'&&!rid){

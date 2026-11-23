@@ -76,6 +76,37 @@ try{
  await assert.rejects(store.purgeRecordFile(pid,'docs','../evil'),e=>e.status===400,'非法 ID 必须被拒绝');
  console.log('PASS: hard-delete purges record files and whole document directories (with images), idempotent and rejects invalid ids.');
 
+ // 任务新增的验收清单与参考图：字段要能往返保存，老任务缺字段也要能读；
+ // 参考图按内容哈希命名（同图不重复存），彻底删除任务时整个 tasks/<id>/ 目录连同图片一起消失。
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jK1sAAAAASUVORK5CYII=','base64');
+ const taskBase=await store.load(),withAcceptance=copy(taskBase),target=withAcceptance.projects[0].tasks[0];
+ target.acceptance=[{id:randomUUID(),text:'能跑通',desc:'第一行\n第二行',done:true},{id:randomUUID(),text:'',desc:'只有描述也算一条',done:false}];
+ target.images=[{name:'pending.png',size:png.length}];
+ await store.save(taskBase,withAcceptance);
+ const acceptanceBack=(await new ProjectStore(root).load()).projects[0].tasks.find(t=>t.id===target.id);
+ assert.deepEqual(acceptanceBack.acceptance,target.acceptance,'验收清单必须完整往返（含换行与空标题）');
+ assert.deepEqual(acceptanceBack.images,target.images,'参考图清单必须完整往返');
+ const legacyTask=copy(taskBase.projects[0].tasks[1]);delete legacyTask.acceptance;delete legacyTask.images;
+ const legacyState=copy(taskBase);legacyState.projects[0].tasks[1]=legacyTask;await store.save(taskBase,legacyState);
+ assert.equal((await new ProjectStore(root).load()).projects[0].tasks[1].id,legacyTask.id,'缺新字段的老任务必须仍可读');
+ const brokenState=copy(await store.load());brokenState.projects[0].tasks[0].acceptance=[{id:randomUUID(),text:'缺 done 字段',desc:''}];
+ await assert.rejects(store.save(await store.load(),brokenState),e=>e.status===400,'验收清单结构不合法必须拒绝写入');
+ const imageProject=await store.load(),imageTask=imageProject.projects[0].tasks[0];
+ const written=await store.writeTaskImage(imageProject.projects[0].id,imageTask.id,png);
+ assert.match(written.name,/^[a-f0-9]{32}\.png$/);assert.equal(written.mime,'image/png');
+ assert.deepEqual((await store.readTaskImage(imageProject.projects[0].id,imageTask.id,written.name)).data,png,'写入的任务图片必须能原样读回');
+ assert.equal((await store.writeTaskImage(imageProject.projects[0].id,imageTask.id,png)).name,written.name,'同一张图重复上传不应产生第二个文件');
+ await store.deleteTaskImage(imageProject.projects[0].id,imageTask.id,written.name);
+ await assert.rejects(store.readTaskImage(imageProject.projects[0].id,imageTask.id,written.name),e=>e.status===404,'删除后图片不应再读得到');
+ await assert.rejects(store.writeTaskImage(imageProject.projects[0].id,imageTask.id,Buffer.from('<svg onload="bad"/>')),e=>e.status===415,'非图片内容必须被拒绝');
+ await store.writeTaskImage(imageProject.projects[0].id,imageTask.id,png);
+ const taskFolder=path.join(store.directory,imageProject.projects[0].id,'tasks',imageTask.id);
+ assert.ok((await fs.stat(path.join(taskFolder,'Image',written.name))).isFile());
+ const dropBase=await store.load(),dropped=copy(dropBase);dropped.projects[0].tasks=dropped.projects[0].tasks.filter(t=>t.id!==imageTask.id);
+ await store.save(dropBase,dropped);await store.purgeRecordFile(imageProject.projects[0].id,'tasks',imageTask.id);
+ await assert.rejects(fs.stat(taskFolder),e=>e.code==='ENOENT','彻底删除任务后 tasks/<id>/ 目录（含参考图）必须消失');
+ console.log('PASS: task acceptance/images round trip, legacy tasks load, invalid acceptance rejected, hashed task images dedupe and purge with the task.');
+
  const rollbackBase=await store.load(),failed=copy(rollbackBase);failed.projects.push(defaultWorkspace().projects[0]);
  const realApply=store.apply.bind(store);let count=0;store.apply=async(...args)=>{if(++count===3)throw new Error('Simulated disk failure');return realApply(...args);};
  await assert.rejects(store.save(rollbackBase,failed),/Simulated disk failure/);store.apply=realApply;assert.deepEqual(workspaceFiles(await store.load()),workspaceFiles(rollbackBase));

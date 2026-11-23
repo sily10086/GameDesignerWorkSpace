@@ -57,6 +57,23 @@ Gitee 安装包先发布为发行版附件，确认下载地址可用后，再�
 - Gitee 对安装包忽略 Range 请求、返回整包，但更新器测速只读开头 256 KB 就断开，不受影响。
 - 端到端复验：更新检测来源已能得到 gitee；两源安装包校验值一致（42f955fd / 85960075）。
 
+## 源码目录重建（2026-11-20 晚）
+
+原来的 `D:/WorkerSpace-src` 目录连同里面的 git 仓库被删掉了，git 的提交历史跟着一起没了。重建办法：
+
+- 从 GitHub 的 `main` 分支下载了一份完整源码包（内容对应刚发布的 v1.7.1），放在 `D:/WorkerSpace-src`。
+- 再用运行目录 `D:/WorkerSpace/App` 里正在跑的代码覆盖上去，保证"源码 = 线上实际在用的那份代码"。覆盖了 7 个文件：`dist/app.js`、`dist/style.css`、`dist/project-model.js`、`dist/library-view.js`、`server.mjs`、`storage.mjs`、`scripts/verify-library.mjs`；另外补上两个新文件 `xlsx-read.mjs`（读 Excel / CSV）和 `dist/doc-structure.js`（文档目录结构与关系图）。
+- 校验方法很直接：把本地每个文件的内容指纹和 GitHub 上同名文件的指纹逐个比对。**345 个文件完全相同**，只有上面这几个是"本地更新、还没发布"的版本——说明恢复既没丢东西，也没混进错的文件。
+- 在源码目录里重新 `git init`，把当前代码做成第一个提交，远端地址仍指向原仓库。
+
+⚠️ **这个本地仓库和 GitHub 上的仓库不共享提交历史**（历史随目录一起丢失，无法凭空造回来）。因此：
+
+- 改代码、跑测试、构建安装包都不受影响。
+- **但暂时不能直接 push**：两边历史对不上，推送会被拒绝；强行覆盖会把 GitHub 上的记录抹掉。
+- 想恢复历史：等 `github.com:443` 的 git 通道能通（这次是被网络代理拦住，`codeload` 与 API 能通、git 通道返回 502），删掉 `.git` 重新 `git clone` 即可；或 `git fetch origin main` 成功后把自己的提交 rebase 到真实历史上。
+
+顺带修了一处测试环境问题：`scripts/verify-library.mjs` 没把新增的 `doc-structure` 函数放进沙箱，跑 `npm test` 会报 `setupDocStructure is not defined`，现在补上了占位函数。
+
 ## 源码运行
 
 源码模式提供版本检查与 GitHub 下载入口。原地安装只面向发行版目录；源码目录、node_modules 和开发工具不交给用户更新器覆盖。

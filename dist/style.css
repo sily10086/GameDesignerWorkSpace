@@ -122,3 +122,49 @@
 .sheet-note{font-size:11px;color:#94a08a;margin:10px 0 0}
 .sheet-tabs{padding:0;margin:0 0 4px}
 .modal.wide{width:min(1040px,94vw)}
+
+/* ── 任务面板：和文档编辑器共用右侧半屏骨架，这里只补任务自己的排版 ───────── */
+.task-panel .document-body{padding:0}
+.task-panel .document-title-bar{padding-bottom:14px}
+.task-form{padding:6px 34px 40px;display:flex;flex-direction:column;gap:20px}
+.task-form .form-grid{gap:0 18px}
+.task-form .field{margin-bottom:0}
+.task-form .field textarea{min-height:132px}
+.task-block{border-top:1px solid #eef1ec;padding-top:18px}
+.task-images-head,.task-acceptance-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.task-images-head>span{font-size:11px;color:#809171}
+.task-images-head small{font-size:9px;color:#a4ae9b}
+.task-drop{border:1px dashed #d6e0cf;border-radius:8px;background:#fafcf7;padding:16px;text-align:center;color:#93a087;font-size:11px;line-height:1.9;cursor:pointer}
+.task-drop .icon{width:17px;height:17px;color:#96ac86}
+.task-drop p{margin:4px 0 2px}
+.task-drop small{font-size:9px;color:#adb6a4}
+.task-drop.drop-active{border-color:#8aa87b;background:#f2f7ec}
+.task-image-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px;margin-top:12px}
+.task-image{position:relative;margin:0;border:1px solid #e6ece0;border-radius:7px;overflow:hidden;background:#fff}
+.task-image-open{display:block;width:100%;height:88px;padding:0}
+.task-image-open img{width:100%;height:100%;object-fit:cover;display:block}
+.task-image-remove{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:#ffffffd9;color:#7c8b80;display:grid;place-items:center;box-shadow:0 1px 3px #2a3b2a26}
+.task-image-remove .icon{width:11px;height:11px}
+.task-image-remove:hover{background:#fff;color:#b1766a}
+.task-acceptance-head h3{font-size:11px;color:#809171;font-weight:400;display:flex;align-items:center;gap:8px}
+.task-acceptance-head .badge{font-size:9px;background:#eef3e8;color:#7b9370;border-radius:4px;padding:2px 6px}
+.task-acceptance-head .btn{margin-left:auto;padding:6px 10px;min-height:28px;font-size:10px}
+.acceptance-list{display:flex;flex-direction:column;gap:10px}
+.acceptance-item{display:flex;gap:10px;align-items:flex-start;border:1px solid #e9eee4;border-radius:8px;padding:11px 12px;background:#fdfefa}
+.acceptance-item.done{background:#f7faf4}
+.acceptance-check{width:16px;height:16px;border:1px solid #d5ddcf;border-radius:4px;display:grid;place-items:center;flex-shrink:0;margin-top:3px;background:#fff}
+.acceptance-check .icon{width:11px;height:11px}
+.acceptance-check.done{background:#729475;border-color:#729475;color:#fff}
+.acceptance-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.acceptance-text{width:100%;border:0;background:transparent;font-size:12px;color:#3f5744;padding:2px 0;outline:none}
+.acceptance-item.done .acceptance-text{text-decoration:line-through;color:#9faa9a}
+.acceptance-desc{width:100%;border:1px solid #e6ece0;border-radius:6px;background:#fff;padding:8px 10px;font-size:11px;line-height:1.8;color:#5b6f5d;min-height:56px;resize:vertical}
+.acceptance-remove{color:#b3bdb1;width:20px;height:20px;display:grid;place-items:center;flex-shrink:0}
+.acceptance-remove:hover{color:#b1766a}
+.acceptance-remove .icon{width:12px;height:12px}
+.acceptance-empty{border:1px dashed #dfe7d8;border-radius:8px;padding:14px;font-size:10px;color:#a4ae9b;line-height:1.9;text-align:center}
+.task-meta-badge{display:inline-block;margin-left:6px;padding:1px 5px;border-radius:4px;background:#f0f4eb;color:#84987a;font-size:9px}
+.task-meta-badge.all-done{background:#e9f2e4;color:#6f9566}
+.image-lightbox{position:fixed;inset:0;z-index:300;background:#14231bbb;backdrop-filter:blur(3px);display:grid;place-items:center;padding:40px;cursor:zoom-out}
+.image-lightbox img{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 20px 60px #00000059;background:#fff}
+.image-lightbox-close{position:fixed;top:22px;right:26px;color:#eef3ea;background:#ffffff24;border-radius:50%;width:34px;height:34px;display:grid;place-items:center}

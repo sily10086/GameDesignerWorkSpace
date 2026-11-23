@@ -121,6 +121,12 @@ export class ProjectStore {
     if(type==='docs'||type==='numerics')await fs.rm(target,{recursive:true,force:true});
     else await fs.rm(target,{force:true});
     if(type==='numerics')await fs.rm(path.join(directory,'numerics',recordId+'.json'),{force:true});
+    // 任务除了 JSON 还可能有参考图目录，一起清掉，别把图片留在项目里。
+    if(type==='tasks'){
+      const images=path.join(directory,'tasks',recordId);
+      const blockedImages=this.unsafePurgeTarget(images);if(blockedImages)throw new StorageError(blockedImages,409);
+      await fs.rm(images,{recursive:true,force:true});
+    }
     await this.prune(path.dirname(target));
     return {removed:target};
   }
@@ -141,6 +147,34 @@ export class ProjectStore {
     const folder=await this.documentImageFolder(id,docId),file=path.join(folder,name);await this.checkParents(file);
     const stat=await fs.stat(file);if(!stat.isFile()||stat.size>MAX_BYTES)throw new StorageError('图片不存在或过大。',404);
     return {file,data:await fs.readFile(file)};
+  }
+  // 任务的参考图放在 tasks/<任务 ID>/Image/ 里，命名与文档图片一致（内容哈希，同名同图自然去重）。
+  // 只校验项目存在、不要求任务记录已经落盘：新建任务在点「保存」之前也能先放图，取消时再用彻底删除接口清掉目录。
+  async taskImageFolder(id,taskId){
+    if(!safeId(id)||!safeId(taskId))throw new StorageError('项目或任务 ID 无效。');
+    const directory=this.getLocation(id),metadata=path.join(directory,'project.json');await this.checkParents(metadata);
+    const project=await this.object(metadata);if(project.id!==id||project.deletedAt)throw new StorageError('项目不存在。',404);
+    return path.join(directory,'tasks',taskId,'Image');
+  }
+  async writeTaskImage(id,taskId,data){
+    const {extension,mime}=detectImage(data),folder=await this.taskImageFolder(id,taskId);
+    const name=createHash('sha256').update(data).digest('hex').slice(0,32)+'.'+extension,file=path.join(folder,name);
+    await this.checkParents(file);await fs.mkdir(folder,{recursive:true});
+    try{await fs.writeFile(file,data,{flag:'wx'});}catch(error){if(error.code!=='EEXIST')throw error;const current=await fs.readFile(file);if(!current.equals(data))throw new StorageError('图片文件发生冲突，未覆盖。',409);}
+    return {name,mime,size:data.length};
+  }
+  async readTaskImage(id,taskId,name){
+    if(typeof name!=='string'||!name||name==='.'||name==='..'||/[\\/\x00-\x1f:]/.test(name))throw new StorageError('图片路径无效。');
+    const folder=await this.taskImageFolder(id,taskId),file=path.join(folder,name);await this.checkParents(file);
+    const stat=await fs.stat(file).catch(()=>{throw new StorageError('图片不存在或过大。',404);});
+    if(!stat.isFile()||stat.size>MAX_BYTES)throw new StorageError('图片不存在或过大。',404);
+    return {file,data:await fs.readFile(file)};
+  }
+  async deleteTaskImage(id,taskId,name){
+    if(typeof name!=='string'||!name||name==='.'||name==='..'||/[\\/\x00-\x1f:]/.test(name))throw new StorageError('图片路径无效。');
+    const folder=await this.taskImageFolder(id,taskId),file=path.join(folder,name);await this.checkParents(file);
+    await fs.rm(file,{force:true});await this.prune(folder);
+    return {removed:name};
   }
   async numericFolder(id,recordId){
     if(!safeId(id)||!safeId(recordId))throw new StorageError('数值表参数无效。');
