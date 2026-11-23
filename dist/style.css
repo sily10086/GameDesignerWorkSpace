@@ -178,3 +178,5 @@
 .task-rich-small .rich-toolbar i,.task-rich-small .rich-toolbar select,.task-rich-small .rich-toolbar .rich-toolbar-spacer{display:none}
 .task-rich-small .rich-document{padding:8px 10px 4px}
 .task-rich-small .rich-editor .tiptap{min-height:66px}
+/* 验收项里的图别把整条撑太高，正文里仍可点开看大图 */
+.task-rich-small .rich-editor .tiptap img{max-height:240px}
