@@ -49,14 +49,16 @@ function taskDraftFrom(record,preset){
 }
 function openTask(id,preset={}){
   if(editor)dismissEditor();
+  if(taskEditor)dismissTaskPanel();
   if($('#modal-root').children.length){$('#app').inert=false;$('#modal-root').innerHTML='';}
   const record=id?project().tasks.find(t=>t.id===id):null;
   if(id&&!record)return toast('这条任务已经不存在。');
-  taskEditor={original:record,isNew:!record,draft:taskDraftFrom(record,preset),uploaded:[]};
+  taskEditor={original:record,isNew:!record,draft:taskDraftFrom(record,preset),uploaded:[],richEditors:new Map()};
   renderTaskPanel(true);
 }
 function dismissTaskPanel(){
   if(!taskEditor)return;
+  flushTaskRich();destroyTaskRich();
   taskLayout?.destroy();taskLayout=null;
   const root=$('#document-root');if(root)root.innerHTML='';
   taskEditor=null;
@@ -69,43 +71,130 @@ async function discardTaskDraft(state){
 }
 function taskAcceptanceStats(draft){const list=draft.acceptance||[];return {done:list.filter(a=>a.done).length,total:list.length};}
 function taskMetaBadges(t){
-  const acc=Array.isArray(t.acceptance)?t.acceptance:[],done=acc.filter(a=>a.done).length,imgs=(Array.isArray(t.images)?t.images.length:0)+acc.reduce((n,a)=>n+((a.images||[]).length),0);
+  const acc=Array.isArray(t.acceptance)?t.acceptance:[],done=acc.filter(a=>a.done).length,imgs=taskImageCount(t);
   return `${acc.length?`<span class="task-meta-badge ${done===acc.length?'all-done':''}">验收 ${done}/${acc.length}</span>`:''}${imgs?`<span class="task-meta-badge">参考图 ${imgs}</span>`:''}`;
 }
 function normalizeImageList(list){return Array.isArray(list)?list.filter(i=>i&&i.name).map(i=>({name:i.name,size:Number(i.size)||0})):[];}
-function taskImageBase(){return `/api/projects/${encodeURIComponent(project().id)}/tasks/${encodeURIComponent(taskEditor.draft.id)}/images/`;}
-// 图片贴在各自的输入框下面：任务描述一份，每条验收项各一份。粘在哪个框里就归哪个框。
-function draftImages(kind,targetId){
-  const {draft}=taskEditor;
-  if(kind==='acceptance'){const item=(draft.acceptance||[]).find(a=>a.id===targetId);if(!item)return null;item.images=Array.isArray(item.images)?item.images:[];return item.images;}
-  draft.images=Array.isArray(draft.images)?draft.images:[];return draft.images;
+// ── 任务正文用文档同款编辑器：截图直接粘在正文里，图跟文字一起排 ──────────────
+// 每条正文各挂一个编辑器实例（任务描述一份，每条验收项一份），内容都按 markdown 存。
+let richComposerModule=null;
+function loadRichComposer(){
+  richComposerModule??=import('./vendor/editor-entry.js').catch(error=>{richComposerModule=null;throw error;});
+  return richComposerModule;
 }
-function fieldImageThumbs(kind,targetId,list){
-  const base=taskImageBase();
-  return list.map(i=>`<figure class="field-image"><button type="button" class="field-image-open" data-task-image="${esc(i.name)}" title="查看大图"><img src="${base+encodeURIComponent(i.name)}" alt="参考图" loading="lazy"></button><button type="button" class="field-image-remove" data-image-remove="${esc(i.name)}" data-image-kind="${kind}" data-image-target="${esc(targetId)}" aria-label="移除这张图片">${icon('close')}</button></figure>`).join('')+`<button type="button" class="field-image-add" data-image-add="${kind}:${esc(targetId)}">${icon('plus')}<span>${list.length?'再加一张':'粘贴截图 / 加图'}</span></button>`;
+function taskRichMarkup(kind,targetId,cls=''){
+  return `<div class="task-rich ${cls}" data-rich-kind="${kind}" data-rich-id="${esc(targetId)}"></div>`;
 }
-function fieldImagesMarkup(kind,targetId,list){return `<div class="field-images" data-images-host="${kind}:${esc(targetId)}">${fieldImageThumbs(kind,targetId,list||[])}</div>`;}
-function imagesHost(kind,targetId){return [...document.querySelectorAll('[data-images-host]')].find(el=>el.dataset.imagesHost===`${kind}:${targetId}`)||null;}
-function refreshFieldImages(kind,targetId){const host=imagesHost(kind,targetId);if(host)host.innerHTML=fieldImageThumbs(kind,targetId,draftImages(kind,targetId)||[]);}
+function taskRichKey(kind,targetId){return kind+':'+targetId;}
+function richDraftValue(kind,targetId){
+  if(!taskEditor)return '';
+  if(kind==='acceptance'){const item=taskEditor.draft.acceptance.find(a=>a.id===targetId);return item?String(item.desc||''):'';}
+  return String(taskEditor.draft.description||'');
+}
+function setRichDraft(kind,targetId,markdown){
+  if(!taskEditor)return;
+  if(kind==='acceptance'){const item=taskEditor.draft.acceptance.find(a=>a.id===targetId);if(item)item.desc=markdown;return;}
+  taskEditor.draft.description=markdown;
+}
+// 保存、重排验收项、关闭面板之前，都要先把编辑器里的内容读回草稿。
+function flushTaskRich(){
+  const map=taskEditor?.richEditors;if(!map)return;
+  for(const [key,instance] of map){
+    try{const markdown=instance?.getMarkdown?.();if(typeof markdown==='string'){const at=key.indexOf(':');setRichDraft(key.slice(0,at),key.slice(at+1),markdown);}}catch{}
+  }
+}
+function destroyTaskRich(){
+  const map=taskEditor?.richEditors;if(!map)return;
+  for(const instance of map.values()){try{instance?.destroy?.();}catch{}}
+  map.clear();
+}
+async function uploadRichImage(file,captured){
+  const projectId=project().id,taskId=captured.draft.id;
+  const response=await fetch(`/api/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}/images`,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.error||'图片保存失败。');
+  if(!captured.uploaded.includes(result.name))captured.uploaded.push(result.name);
+  return {name:result.name,source:`/api/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}/images/${encodeURIComponent(result.name)}`,mime:result.mime,size:result.size};
+}
+async function mountTaskRichField(mount){
+  if(!taskEditor||mount.dataset.richMounted)return;
+  const kind=mount.dataset.richKind||'task',targetId=mount.dataset.richId||'',key=taskRichKey(kind,targetId);
+  if(taskEditor.richEditors.has(key))return;
+  mount.dataset.richMounted='1';
+  const captured=taskEditor;
+  mount.innerHTML='<div class="composer-loading">正在准备编辑器…</div>';
+  let module;
+  try{module=await loadRichComposer();}catch{module=null;}
+  if(!module||taskEditor!==captured||!mount.isConnected){mount.innerHTML='';return;}
+  mount.innerHTML=module.composerMarkup();
+  const instance=module.mountComposer(mount,{
+    content:richDraftValue(kind,targetId),
+    projectId:project().id,
+    docId:captured.draft.id,
+    uploadImage:file=>uploadRichImage(file,captured),
+    onChange:markdown=>{if(taskEditor!==captured)return;setRichDraft(kind,targetId,markdown);}
+  });
+  captured.richEditors.set(key,instance);
+}
+function mountTaskRichFields(){$$('.task-rich[data-rich-kind]').forEach(mount=>{void mountTaskRichField(mount);});}
+function markdownImageCount(markdown){return (String(markdown||'').match(/!\[[^\]]*\]\([^)]*\)/g)||[]).length;}
+function taskImageCount(t){
+  const legacy=(Array.isArray(t.images)?t.images.length:0)+(Array.isArray(t.acceptance)?t.acceptance.reduce((n,a)=>n+((a.images||[]).length),0):0);
+  const inline=markdownImageCount(t.description)+(Array.isArray(t.acceptance)?t.acceptance.reduce((n,a)=>n+markdownImageCount(a.desc),0):0);
+  return legacy+inline;
+}
+function markdownSummary(markdown,max=86){
+  const text=String(markdown||'')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g,' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g,'$1')
+    .replace(/^#{1,6}\s*/gm,'')
+    .replace(/[`*_~>#]/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+  return text.length>max?text.slice(0,max)+'…':text;
+}
+// 保存之后清理：这次上传了、但正文里已经删掉的图片，从任务目录删掉，别留孤儿文件。
+async function pruneTaskImages(captured){
+  if(!captured||!captured.uploaded.length)return;
+  const markdown=[captured.draft.description,...(captured.draft.acceptance||[]).map(a=>a.desc)].join('\n');
+  const used=new Set();
+  for(const match of markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)){
+    const name=match[1].split('/').pop();
+    try{used.add(decodeURIComponent(name));}catch{used.add(name);}
+  }
+  for(const name of captured.uploaded){
+    if(used.has(name))continue;
+    try{await fetch(`/api/projects/${encodeURIComponent(project().id)}/tasks/${encodeURIComponent(captured.draft.id)}/images/${encodeURIComponent(name)}`,{method:'DELETE'});}catch{}
+  }
+}
+
 function acceptanceRow(item,index){
-  return `<div class="acceptance-item ${item.done?'done':''}" data-acceptance-row="${item.id}"><button type="button" class="acceptance-check ${item.done?'done':''}" data-acceptance-toggle="${item.id}" aria-label="${item.done?'标记为未完成':'标记为已完成'}">${item.done?icon('check'):''}</button><div class="acceptance-main"><input class="acceptance-text" data-acceptance-text="${item.id}" maxlength="200" placeholder="第 ${index+1} 条验收：写成能验证的一句话" aria-label="第 ${index+1} 条验收项" value="${esc(item.text)}"><textarea class="acceptance-desc" data-acceptance-desc="${item.id}" placeholder="怎么算通过？写清操作步骤、预期结果，或对应哪张参考图。">${esc(item.desc)}</textarea>${fieldImagesMarkup('acceptance',item.id,item.images||[])}</div><button type="button" class="acceptance-remove" data-acceptance-remove="${item.id}" aria-label="删除这条验收项">${icon('close')}</button></div>`;
+  return `<div class="acceptance-item ${item.done?'done':''}" data-acceptance-row="${item.id}"><button type="button" class="acceptance-check ${item.done?'done':''}" data-acceptance-toggle="${item.id}" aria-label="${item.done?'标记为未完成':'标记为已完成'}">${item.done?icon('check'):''}</button><div class="acceptance-main"><input class="acceptance-text" data-acceptance-text="${item.id}" maxlength="200" placeholder="第 ${index+1} 条验收：写成能验证的一句话" aria-label="第 ${index+1} 条验收项" value="${esc(item.text)}">${taskRichMarkup('acceptance',item.id,'task-rich-small')}</div><button type="button" class="acceptance-remove" data-acceptance-remove="${item.id}" aria-label="删除这条验收项">${icon('close')}</button></div>`;
 }
 function renderTaskPanel(first=false){
   if(!taskEditor)return;
   const {draft,isNew}=taskEditor,stats=taskAcceptanceStats(draft);
   let root=$('#document-root');if(!root){root=document.createElement('div');root.id='document-root';document.body.append(root);}
   const firstOpen=first||!root.children.length;
-  root.innerHTML=`<section class="document-panel modal editor task-panel" role="region" aria-label="任务编辑面板"><div class="document-resizer" role="separator" tabindex="0" aria-label="调整面板宽度" aria-orientation="vertical" aria-valuenow="50" aria-valuemin="42" aria-valuemax="80" title="拖动调整宽度 · 双击恢复半屏"><span></span></div><header class="document-topbar"><div>${icon('tasks')}<span>${esc(project().name)} <b>/</b> 任务</span></div><div><button class="document-icon-button" data-action="task-half" title="恢复半屏" aria-label="恢复半屏">◫</button><button class="document-icon-button" data-action="task-fullscreen" title="全屏编辑" aria-label="全屏编辑">${icon('expand')}</button><button class="document-icon-button" data-action="close-task" title="关闭（Esc）" aria-label="关闭任务面板">${icon('close')}</button></div></header><div class="document-title-bar"><div class="document-type">TASK <span>${draft.number?'TASK-'+String(draft.number).padStart(3,'0'):'新任务'}</span></div><input id="task-panel-title" data-task-field="title" class="doc-edit-title" aria-label="任务名称" maxlength="180" placeholder="任务名称" value="${esc(draft.title)}"><div class="document-meta"><span class="saved-time">${diskLabel()}</span><span>${isNew?'填好后点「保存任务」写入 Project':'改完点「保存任务」生效'}</span></div></div><div class="document-body"><div class="task-form"><div class="form-grid"><div class="field"><label for="task-panel-category">分类</label><select id="task-panel-category" data-task-field="category">${['策划','程序','美术','音频','其他'].map(c=>`<option value="${c}" ${draft.category===c?'selected':''}>${c}</option>`).join('')}</select></div><div class="field"><label for="task-panel-priority">优先级</label><select id="task-panel-priority" data-task-field="priority">${['高','中','低'].map(c=>`<option value="${c}" ${draft.priority===c?'selected':''}>${c}</option>`).join('')}</select></div><div class="field"><label for="task-panel-status">状态</label><select id="task-panel-status" data-task-field="status">${Object.entries(statuses).map(([k,v])=>`<option value="${k}" ${draft.status===k?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label for="task-panel-due">截止日期</label><input id="task-panel-due" data-task-field="due" type="date" value="${esc(draft.due||'')}"></div><div class="field"><label for="task-panel-owner">负责人</label><input id="task-panel-owner" data-task-field="owner" value="${esc(draft.owner||'')}"></div></div><div class="field"><label for="task-panel-description">描述与验收标准</label><textarea id="task-panel-description" data-task-field="description" placeholder="这条任务要做什么、做到什么程度……">${esc(draft.description||'')}</textarea>${fieldImagesMarkup('task','',draft.images)}</div><div class="task-block"><div class="task-acceptance-head"><h3>验收清单<span class="badge">${stats.total?stats.done+'/'+stats.total:'还没有'}</span></h3><button class="btn" data-action="add-acceptance">${icon('plus')}添加验收项</button></div><div class="acceptance-list">${draft.acceptance.map(acceptanceRow).join('')||'<div class="acceptance-empty">把这条任务拆成几条能勾掉的验收项。每条都能单独写一段说明，验收时一条条对。</div>'}</div></div></div></div><footer class="document-footer">${isNew?'':`<button class="danger-link" data-recycle="tasks" data-id="${draft.id}">移入回收站</button>`}<span></span><button class="btn" data-action="cancel-task">取消</button><button class="btn primary" data-action="save-task">${icon('check')}保存任务</button></footer></section>`;
+  root.innerHTML=`<section class="document-panel modal editor task-panel" role="region" aria-label="任务编辑面板"><div class="document-resizer" role="separator" tabindex="0" aria-label="调整面板宽度" aria-orientation="vertical" aria-valuenow="50" aria-valuemin="42" aria-valuemax="80" title="拖动调整宽度 · 双击恢复半屏"><span></span></div><header class="document-topbar"><div>${icon('tasks')}<span>${esc(project().name)} <b>/</b> 任务</span></div><div><button class="document-icon-button" data-action="task-half" title="恢复半屏" aria-label="恢复半屏">◫</button><button class="document-icon-button" data-action="task-fullscreen" title="全屏编辑" aria-label="全屏编辑">${icon('expand')}</button><button class="document-icon-button" data-action="close-task" title="关闭（Esc）" aria-label="关闭任务面板">${icon('close')}</button></div></header><div class="document-title-bar"><div class="document-type">TASK <span>${draft.number?'TASK-'+String(draft.number).padStart(3,'0'):'新任务'}</span></div><input id="task-panel-title" data-task-field="title" class="doc-edit-title" aria-label="任务名称" maxlength="180" placeholder="任务名称" value="${esc(draft.title)}"><div class="document-meta"><span class="saved-time">${diskLabel()}</span><span>${isNew?'填好后点「保存任务」写入 Project':'改完点「保存任务」生效'}</span></div></div><div class="document-body"><div class="task-form"><div class="form-grid"><div class="field"><label for="task-panel-category">分类</label><select id="task-panel-category" data-task-field="category">${['策划','程序','美术','音频','其他'].map(c=>`<option value="${c}" ${draft.category===c?'selected':''}>${c}</option>`).join('')}</select></div><div class="field"><label for="task-panel-priority">优先级</label><select id="task-panel-priority" data-task-field="priority">${['高','中','低'].map(c=>`<option value="${c}" ${draft.priority===c?'selected':''}>${c}</option>`).join('')}</select></div><div class="field"><label for="task-panel-status">状态</label><select id="task-panel-status" data-task-field="status">${Object.entries(statuses).map(([k,v])=>`<option value="${k}" ${draft.status===k?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label for="task-panel-due">截止日期</label><input id="task-panel-due" data-task-field="due" type="date" value="${esc(draft.due||'')}"></div><div class="field"><label for="task-panel-owner">负责人</label><input id="task-panel-owner" data-task-field="owner" value="${esc(draft.owner||'')}"></div></div><div class="field"><label>描述与验收标准<span class="task-rich-hint">截图可以直接粘进正文，和文档一样</span></label>${taskRichMarkup('task','')}</div><div class="task-block"><div class="task-acceptance-head"><h3>验收清单<span class="badge">${stats.total?stats.done+'/'+stats.total:'还没有'}</span></h3><button class="btn" data-action="add-acceptance">${icon('plus')}添加验收项</button></div><div class="acceptance-list">${draft.acceptance.map(acceptanceRow).join('')||'<div class="acceptance-empty">把这条任务拆成几条能勾掉的验收项。每条都能单独写一段说明，验收时一条条对。</div>'}</div></div></div></div><footer class="document-footer">${isNew?'':`<button class="danger-link" data-recycle="tasks" data-id="${draft.id}">移入回收站</button>`}<span></span><button class="btn" data-action="cancel-task">取消</button><button class="btn primary" data-action="save-task">${icon('check')}保存任务</button></footer></section>`;
   taskLayout?.destroy();taskLayout=attachDocumentLayout($('.task-panel'));
-  bindTaskImageZones();
+  mountTaskRichFields();
   if(firstOpen&&!matchMedia('(prefers-reduced-motion: reduce)').matches)$('.task-panel').animate([{transform:'translateX(50px)',opacity:0},{transform:'translateX(0)',opacity:1}],{duration:260,easing:'cubic-bezier(.2,.8,.2,1)'});
   if(firstOpen)setTimeout(()=>{const input=$('#task-panel-title');if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}},0);
 }
 function renderAcceptanceList(){
   const host=$('.acceptance-list');if(!host||!taskEditor)return;
+  flushTaskRich();
+  // 只重建验收项自己的编辑器：任务描述那块 DOM 不动，别把它一起销毁了。
+  for(const [key,instance] of [...taskEditor.richEditors]){
+    if(!key.startsWith('acceptance:'))continue;
+    try{instance?.destroy?.();}catch{}
+    taskEditor.richEditors.delete(key);
+  }
   const {draft}=taskEditor,stats=taskAcceptanceStats(draft);
   host.innerHTML=draft.acceptance.map(acceptanceRow).join('')||'<div class="acceptance-empty">把这条任务拆成几条能勾掉的验收项。每条都能单独写一段说明，验收时一条条对。</div>';
   const badge=$('.task-acceptance-head .badge');if(badge)badge.textContent=stats.total?stats.done+'/'+stats.total:'还没有';
+  mountTaskRichFields();
 }
 function addAcceptance(){
   if(!taskEditor)return;
@@ -115,83 +204,34 @@ function addAcceptance(){
 }
 function toggleAcceptance(id){const a=taskEditor?.draft.acceptance.find(x=>x.id===id);if(!a)return;a.done=!a.done;renderAcceptanceList();}
 function removeAcceptance(id){if(!taskEditor)return;taskEditor.draft.acceptance=taskEditor.draft.acceptance.filter(x=>x.id!==id);renderAcceptanceList();}
-function pickImageFor(target={kind:'task',id:''}){
-  if(!taskEditor)return;
-  const input=document.createElement('input');input.type='file';input.accept='image/*';input.multiple=true;
-  input.addEventListener('change',()=>{for(const file of input.files||[])void uploadTaskImage(file,target);});
-  input.click();
-}
-// 粘在哪个框里就归哪个框；拖到面板上也是按落点决定归属。
-function imageTargetFrom(el){
-  const desc=el?.closest?.('[data-acceptance-desc]');
-  if(desc)return {kind:'acceptance',id:desc.dataset.acceptanceDesc};
-  return {kind:'task',id:''};
-}
-function bindTaskImageZones(){
-  const form=$('.task-form');if(!form||form.dataset.imageZones)return;
-  form.dataset.imageZones='1';
-  form.addEventListener('dragover',e=>{if([...(e.dataTransfer?.types||[])].includes('Files')){e.preventDefault();e.dataTransfer.dropEffect='copy';}});
-  form.addEventListener('drop',e=>{const files=[...(e.dataTransfer?.files||[])].filter(f=>String(f.type||'').startsWith('image/'));if(!files.length)return;e.preventDefault();const target=imageTargetFrom(e.target);for(const file of files)void uploadTaskImage(file,target);});
-}
-async function uploadTaskImage(file,target={kind:'task',id:''}){
-  if(!taskEditor)return;
-  if(!String(file.type||'').startsWith('image/'))return toast('只能放图片文件（PNG / JPG / GIF / WebP / AVIF）。');
-  if(file.size>20*1024*1024)return toast('单张图片请控制在 20 MB 以内。');
-  const captured=taskEditor,list=draftImages(target.kind,target.id||'');
-  if(!list)return;
-  try{
-    const response=await fetch(`/api/projects/${encodeURIComponent(project().id)}/tasks/${encodeURIComponent(captured.draft.id)}/images`,{method:'POST',headers:{'Content-Type':file.type},body:file});
-    const result=await response.json();
-    if(!response.ok)throw new Error(result.error||'图片保存失败。');
-    if(taskEditor!==captured)return;
-    if(!list.some(i=>i.name===result.name))list.push({name:result.name,size:result.size});
-    if(!captured.uploaded.includes(result.name))captured.uploaded.push(result.name);
-    refreshFieldImages(target.kind,target.id||'');
-  }catch(error){toast(error.message||'图片保存失败，请重试。');}
-}
-async function removeTaskImage(name,target={kind:'task',id:''}){
-  if(!taskEditor)return;
-  const {draft}=taskEditor,list=draftImages(target.kind,target.id||'');
-  if(!list)return;
-  list.splice(0,list.length,...list.filter(i=>i.name!==name));
-  // 同一张图可能同时被任务描述和某条验收引用：别处还在用就只去掉这一处，文件留着。
-  const stillUsed=[...(draft.images||[]),...(draft.acceptance||[]).flatMap(a=>a.images||[])].some(i=>i.name===name);
-  if(!stillUsed&&taskEditor.uploaded.includes(name)){
-    try{await fetch(`/api/projects/${encodeURIComponent(project().id)}/tasks/${encodeURIComponent(draft.id)}/images/${encodeURIComponent(name)}`,{method:'DELETE'});}catch{}
-    taskEditor.uploaded=taskEditor.uploaded.filter(n=>n!==name);
-  }
-  refreshFieldImages(target.kind,target.id||'');
-}
-function previewTaskImage(name){
-  if(!taskEditor)return;
-  const wrap=document.createElement('div');wrap.className='image-lightbox';
-  wrap.innerHTML=`<img src="/api/projects/${encodeURIComponent(project().id)}/tasks/${encodeURIComponent(taskEditor.draft.id)}/images/${encodeURIComponent(name)}" alt="参考图"><button class="image-lightbox-close" aria-label="关闭">${icon('close')}</button>`;
-  wrap.addEventListener('click',()=>wrap.remove());
-  document.body.append(wrap);
-}
 async function saveTask(){
   if(!taskEditor)return;
   const {draft,original,isNew}=taskEditor;
+  flushTaskRich();
   draft.title=String(draft.title||'').trim();
   if(!draft.title)return toast('请填写任务名称。');
   if(!draft.due)return toast('请选择截止日期。');
-  draft.acceptance=draft.acceptance.filter(a=>String(a.text||'').trim()||String(a.desc||'').trim());
+  draft.description=String(draft.description||'');
+  draft.acceptance=draft.acceptance.filter(a=>String(a.text||'').trim()||String(a.desc||'').trim()||markdownImageCount(a.desc));
   draft.updated=today();
   const p=project();
   if(isNew)p.tasks.unshift(draft);else Object.assign(original,draft);
   activity(`${isNew?'创建':'更新'}了「${draft.title}」`,'tasks',draft.id);
   persist();
   const ok=await disk.flush();
+  destroyTaskRich();
   taskLayout?.destroy();taskLayout=null;
   const root=$('#document-root');if(root)root.innerHTML='';
+  const captured=taskEditor;
   taskEditor=null;render();
+  void pruneTaskImages(captured);
   toast(ok?'任务已写入 Project。':'任务已保存在页面里，但写入磁盘未完成，请查看保存提示。');
 }
 async function cancelTask(){
   if(!taskEditor)return;
   const prev=taskEditor;dismissTaskPanel();await discardTaskDraft(prev);render();
 }
-function tasksPage(){const p=project(),filtered=p.tasks.filter(t=>(!taskFilter||(t.title+' '+t.description+' '+t.owner).toLowerCase().includes(taskFilter.toLowerCase()))&&(!taskCategory||t.category===taskCategory));return heading('一步一步，靠近你的游戏。',`${p.tasks.length} 个任务 · ${p.tasks.filter(t=>t.status==='done').length} 个已完成`,button('新建任务','new-tasks','plus',true),'PLAN / TASKS')+`<div class="toolbar"><input id="task-search" class="input" placeholder="搜索任务、描述、负责人..." value="${esc(taskFilter)}"><select id="task-category" class="select" aria-label="按分类筛选任务"><option value="">全部分类</option>${['策划','程序','美术','音频','其他'].map(c=>`<option ${taskCategory===c?'selected':''}>${c}</option>`).join('')}</select><div style="margin-left:auto;display:flex;gap:6px"><button class="btn ${taskMode==='board'?'primary':''}" data-view="board">${icon('grid')}看板</button><button class="btn ${taskMode==='list'?'primary':''}" data-view="list">${icon('tasks')}列表</button></div></div>${taskMode==='board'?`<div class="board">${Object.entries(statuses).map(([k,v])=>`<section class="board-col" data-drop="${k}"><div class="column-title"><span class="status-dot ${k==='progress'?'progressing':k}"></span>${v}<span class="badge">${filtered.filter(t=>t.status===k).length}</span><button data-add-status="${k}" aria-label="添加${v}任务">${icon('plus')}</button></div>${filtered.filter(t=>t.status===k).map(t=>`<article class="board-card card-has-delete" draggable="true" data-drag="${t.id}"><div class="card-head">${tag(t.category)}${tag(t.priority,tagClass(t.priority))}</div><button class="task-body" style="width:100%" data-edit="tasks" data-id="${t.id}"><h4>${esc(t.title)}</h4><p>${esc(t.description)}</p></button><div class="card-foot">${icon('calendar')}${dateLabel(t.due)}${taskMetaBadges(t)}${avatar(t.owner)}${cardDelete('tasks',t.id)}</div><select class="card-status" data-task-status="${t.id}" aria-label="更改${esc(t.title)}状态">${Object.entries(statuses).map(([s,n])=>`<option value="${s}" ${s===t.status?'selected':''}>${n}</option>`).join('')}</select></article>`).join('')||'<div class="empty-col">把下一个小目标放在这里</div>'}</section>`).join('')}</div>`:`<div class="panel">${filtered.map(taskRow).join('')||'<div class="empty">没有找到匹配的任务。</div>'}</div>`}`;}
+function tasksPage(){const p=project(),filtered=p.tasks.filter(t=>(!taskFilter||(t.title+' '+t.description+' '+t.owner).toLowerCase().includes(taskFilter.toLowerCase()))&&(!taskCategory||t.category===taskCategory));return heading('一步一步，靠近你的游戏。',`${p.tasks.length} 个任务 · ${p.tasks.filter(t=>t.status==='done').length} 个已完成`,button('新建任务','new-tasks','plus',true),'PLAN / TASKS')+`<div class="toolbar"><input id="task-search" class="input" placeholder="搜索任务、描述、负责人..." value="${esc(taskFilter)}"><select id="task-category" class="select" aria-label="按分类筛选任务"><option value="">全部分类</option>${['策划','程序','美术','音频','其他'].map(c=>`<option ${taskCategory===c?'selected':''}>${c}</option>`).join('')}</select><div style="margin-left:auto;display:flex;gap:6px"><button class="btn ${taskMode==='board'?'primary':''}" data-view="board">${icon('grid')}看板</button><button class="btn ${taskMode==='list'?'primary':''}" data-view="list">${icon('tasks')}列表</button></div></div>${taskMode==='board'?`<div class="board">${Object.entries(statuses).map(([k,v])=>`<section class="board-col" data-drop="${k}"><div class="column-title"><span class="status-dot ${k==='progress'?'progressing':k}"></span>${v}<span class="badge">${filtered.filter(t=>t.status===k).length}</span><button data-add-status="${k}" aria-label="添加${v}任务">${icon('plus')}</button></div>${filtered.filter(t=>t.status===k).map(t=>`<article class="board-card card-has-delete" draggable="true" data-drag="${t.id}"><div class="card-head">${tag(t.category)}${tag(t.priority,tagClass(t.priority))}</div><button class="task-body" style="width:100%" data-edit="tasks" data-id="${t.id}"><h4>${esc(t.title)}</h4><p>${esc(markdownSummary(t.description))}</p></button><div class="card-foot">${icon('calendar')}${dateLabel(t.due)}${taskMetaBadges(t)}${avatar(t.owner)}${cardDelete('tasks',t.id)}</div><select class="card-status" data-task-status="${t.id}" aria-label="更改${esc(t.title)}状态">${Object.entries(statuses).map(([s,n])=>`<option value="${s}" ${s===t.status?'selected':''}>${n}</option>`).join('')}</select></article>`).join('')||'<div class="empty-col">把下一个小目标放在这里</div>'}</section>`).join('')}</div>`:`<div class="panel">${filtered.map(taskRow).join('')||'<div class="empty">没有找到匹配的任务。</div>'}</div>`}`;}
 function roadmapPage(){const p=project(),rate=p.tasks.length?Math.round(p.tasks.filter(t=>t.status==='done').length/p.tasks.length*100):0;return heading('给每一段旅程，一个坐标。','从第一个原型，到玩家手中的世界。',button('新建里程碑','new-milestones','plus',true),'PLAN / MILESTONES')+`<div class="timeline">${[...p.milestones].sort((a,b)=>a.date.localeCompare(b.date)).map((m,i)=>`<div class="timeline-item card-has-delete"><div class="timeline-rail">${dateLabel(m.date)}<div style="margin-top:8px;font-size:9px">${m.date.slice(0,4)}</div></div><button class="timeline-card" style="text-align:left" data-edit="milestones" data-id="${m.id}">${tag(statuses[m.status],m.status==='done'?'green':m.status==='progress'?'orange':'blue')}<h3>${esc(m.title)}</h3><p>${esc(m.description)}</p>${m.status==='progress'?`<div class="progress"><span style="width:${rate}%"></span></div><div class="meta-line"><span>项目任务完成度 ${rate}%</span><span>${daysUntil(m.date)>=0?'还有 '+daysUntil(m.date)+' 天':'已逾期 '+Math.abs(daysUntil(m.date))+' 天'}</span></div>`:''}</button>${cardDelete('milestones',m.id)}</div>`).join('')||'<div class="empty">还没有里程碑。为项目设定一个值得期待的目标。</div>'}</div>`;}
 function docsPage(){const p=project(),docs=p.docs.filter(d=>(!recordFilter||(d.title+d.content).toLowerCase().includes(recordFilter.toLowerCase()))&&(docTab==='all'||d.diagrams.some(g=>g.type===docTab)));return heading('让好点子，有据可循。','文档、思维导图与流程图，在同一个创作空间里。',button('新建文档','new-doc','plus',true),'DESIGN / DOCUMENTS')+`<div class="toolbar"><input class="input" id="record-search" placeholder="搜索文档标题与正文..." value="${esc(recordFilter)}"><button class="btn ${docTab==='all'?'primary':''}" data-doc-tab="all">全部文档</button><button class="btn ${docTab==='mindmap'?'primary':''}" data-doc-tab="mindmap">${icon('mind')}思维导图</button><button class="btn ${docTab==='flowchart'?'primary':''}" data-doc-tab="flowchart">${icon('flow')}流程图</button><span class="doc-view-switch"><button class="btn ${getView()==='cards'?'primary':''}" data-doc-view="cards">${icon('grid')}卡片</button><button class="btn ${getView()==='table'?'primary':''}" data-doc-view="table">${icon('tasks')}表格</button><button class="btn ${getView()==='graph'?'primary':''}" data-doc-view="graph">${icon('link')}链接图</button></span></div>${getView()==='table'?tableMarkup(p,docCtx()):getView()==='graph'?graphMarkup(docCtx()):`<div class="catalog">${docs.map(d=>`<article class="catalog-card card-has-delete"><button class="card-open" data-edit="docs" data-id="${d.id}"><div class="card-head" style="color:#7f9b70">${icon('doc')}${tag(d.category)}</div><h3>${esc(d.title)}</h3><p>${esc(d.content.replace(/[#*\n-]/g,' ').slice(0,86))}...</p><div class="card-foot">${d.version?`<span class="doc-version-tag" title="版本编号">${esc(d.version)}</span>`:''}${d.diagrams.map(g=>tag(g.type==='mindmap'?'思维导图':'流程图',g.type==='mindmap'?'purple':'blue')).join('')}<span style="margin-left:auto">${dateLabel(d.updated)} 更新</span></div></button>${cardDelete('docs',d.id)}</article>`).join('')||'<div class="empty">这里还没有文档，写下游戏的第一个想法吧。</div>'}</div>`}`;}
 function storyCastField(selected){const chars=project().characters;return `<div class="field"><label>出演角色</label><div class="story-checks">${chars.map(c=>`<label class="story-check"><input type="checkbox" name="characters" value="${c.id}" ${(selected||[]).includes(c.id)?'checked':''}>${esc(c.title)}</label>`).join('')||'<span class="doc-links-empty">暂无角色，先到角色档案创建。</span>'}</div></div>`;}
@@ -337,8 +377,8 @@ function addDiagram(){const type=editor.tab==='write'?'mindmap':editor.tab;const
 function searchModal(){modal('搜索项目内容',`<input id="global-search" aria-label="搜索所有内容" placeholder="搜索任务、文档、角色、设定..." autocomplete="off"><div class="search-results" id="search-results"><div class="empty">输入关键词，找到灵感的线索。<br><small>按 Esc 关闭</small></div></div>`,'','search-modal');$('#global-search').focus();}
 function runSearch(q){const p=project(),results=[];if(q.trim())for(const [type,label]of[['tasks','任务'],['docs','文档'],['stories','故事'],['world','设定'],['characters','角色'],['assets','资源'],['bugs','问题'],['logs','日志'],['milestones','里程碑'],['numerics','数值表']])for(const r of p[type])if((r.title+' '+(r.content||r.description||r.notes||'')).toLowerCase().includes(q.toLowerCase()))results.push({type,label,r});$('#search-results').innerHTML=results.length?results.slice(0,40).map(x=>`<button class="search-result" data-open-type="${x.type}" data-id="${x.r.id}"><span>${esc(x.r.title)}</span><small>${x.label}</small></button>`).join(''):`<div class="empty">${q?'没有找到匹配内容，试试别的关键词。':'输入关键词，开始搜索。'}</div>`;}
 function setStatus(type,id,status){const r=project()[type].find(t=>t.id===id);if(!r)return;r.status=status;r.updated=today();activity(`${type==='tasks'?'任务':'问题'}「${r.title}」→ ${statuses[status]}`,type,id);render();void savedToast(`已移至「${statuses[status]}」并写入 Project`);}
-document.addEventListener('click',async e=>{const el=e.target.closest('button,[data-action]');if(!el)return;if(el.dataset.gdTable){const dir=el.dataset.gdTable;if(!composer?.tableAction?.(dir))return;requestAnimationFrame(decorateDocTables);return;}if(el.dataset.numericPick){pickNumericFile(el.dataset.numericPick);return;}if(el.dataset.numericPreview){void previewNumeric(el.dataset.numericPreview);return;}if(el.dataset.numericOpen){void openNumericLocal(el.dataset.numericOpen);return;}if(el.dataset.numericSheet!==undefined){numericSheet=Number(el.dataset.numericSheet)||0;renderNumericPreview();return;}if(el.dataset.page){navigate(el.dataset.page);return;}if(el.dataset.acceptanceToggle){toggleAcceptance(el.dataset.acceptanceToggle);return;}if(el.dataset.acceptanceRemove){removeAcceptance(el.dataset.acceptanceRemove);return;}if(el.dataset.imageAdd){const pair=el.dataset.imageAdd.split(':');pickImageFor({kind:pair[0],id:pair[1]||''});return;}if(el.dataset.imageRemove){void removeTaskImage(el.dataset.imageRemove,{kind:el.dataset.imageKind||'task',id:el.dataset.imageTarget||''});return;}if(el.dataset.taskImage){previewTaskImage(el.dataset.taskImage);return;}if(el.dataset.edit){editRecord(el.dataset.edit,el.dataset.id);return;}if(el.dataset.complete){const t=project().tasks.find(t=>t.id===el.dataset.complete);setStatus('tasks',t.id,t.status==='done'?'todo':'done');return;}if(el.dataset.taskTab){taskTab=el.dataset.taskTab;render();return;}if(el.dataset.view){taskMode=el.dataset.view;render();return;}if(el.dataset.docTab){docTab=el.dataset.docTab;render();return;}if(el.dataset.storyType){storyType=el.dataset.storyType;render();return;}if(el.dataset.addStatus){editRecord('tasks',null,{status:el.dataset.addStatus});return;}if(el.dataset.switch){enterProject(el.dataset.switch);return;}if(el.dataset.editorTab){switchEditorTab(el.dataset.editorTab);return;}if(el.dataset.editDiagram){const g=editor.doc.diagrams.find(g=>g.id===el.dataset.editDiagram);editor.activeDiagram=g.id;editor.tab=g.type;renderEditor();return;}if(el.dataset.openType){const type=el.dataset.openType,id=el.dataset.id;if(!project()[type]?.some(r=>r.id===id)){toast('这条内容已不存在。');return;}closeModal();page=type==='milestones'?'roadmap':type;render();editRecord(type,id);return;}
- const action=el.dataset.action;if(!action)return;if(action==='close-document'){closeDocument();return;}if(action==='document-fullscreen'){documentLayout?.toggleFullscreen();return;}if(action==='document-half'){documentLayout?.destroy();documentLayout=attachDocumentLayout($('.document-panel'));return;}if(action==='close-modal'){closeModal();return;}if(action==='close-task'){closeTaskPanel();return;}if(action==='cancel-task'){await cancelTask();return;}if(action==='save-task'){await saveTask();return;}if(action==='task-fullscreen'){taskLayout?.toggleFullscreen();return;}if(action==='task-half'){taskLayout?.destroy();taskLayout=attachDocumentLayout($('.task-panel'));return;}if(action==='add-acceptance'){addAcceptance();return;}if(action==='pick-task-images'){pickImageFor({kind:'task',id:''});return;}if(action==='retry-save'){await savedToast('已保存到 Project。');return;}if(action==='reload-disk'){await reloadProjectFiles();return;}if(action==='recover-reload'){await reloadProjectFiles(true);return;}if(action==='migrate-browser'){await migrateBrowser();return;}if(action==='retry-load'){await initializeWorkspace();return;}if(action==='mobile'){$('.sidebar').classList.toggle('open');$('.mobile-backdrop').classList.toggle('open');return;}if(action==='projects')return projectsModal();if(action==='new-project')return editProject();if(action==='confirm-delete-project'){await deleteProjectFromLibrary(el.dataset.id);return;}if(action==='purge-trash')return confirmPurgeTrash();if(action==='confirm-purge-trash'){await purgeTrash();return;}if(action==='confirm-purge-project'){await purgeProject(el.dataset.id);return;}if(action==='confirm-purge-record'){await purgeRecord(el.dataset.type,el.dataset.id);return;}if(action==='edit-project')return editProject(project().id);if(action==='quick-create')return quickCreate();if(action==='new-doc')return openDoc();if(action==='new-mindmap')return openDoc(null,'mindmap');if(action==='new-flowchart')return openDoc(null,'flowchart');if(action.startsWith('new-'))return editRecord(action.slice(4));if(action==='search')return searchModal();if(action==='due'){navigate('tasks');taskMode='list';taskFilter='';const tasks=project().tasks.filter(t=>t.status!=='done'&&t.due&&daysUntil(t.due)<=7).sort((a,b)=>a.due.localeCompare(b.due));modal('未来 7 天 · 任务提醒',tasks.length?tasks.map(t=>`<button class="search-result" data-open-type="tasks" data-id="${t.id}"><span>${esc(t.title)}</span><small>${dateLabel(t.due)}${daysUntil(t.due)<0?' · 已逾期':''}</small></button>`).join(''):'<div class="empty">未来 7 天没有即将到期的任务。</div>');return;}
+document.addEventListener('click',async e=>{const el=e.target.closest('button,[data-action]');if(!el)return;if(el.dataset.gdTable){const dir=el.dataset.gdTable;if(!composer?.tableAction?.(dir))return;requestAnimationFrame(decorateDocTables);return;}if(el.dataset.numericPick){pickNumericFile(el.dataset.numericPick);return;}if(el.dataset.numericPreview){void previewNumeric(el.dataset.numericPreview);return;}if(el.dataset.numericOpen){void openNumericLocal(el.dataset.numericOpen);return;}if(el.dataset.numericSheet!==undefined){numericSheet=Number(el.dataset.numericSheet)||0;renderNumericPreview();return;}if(el.dataset.page){navigate(el.dataset.page);return;}if(el.dataset.acceptanceToggle){toggleAcceptance(el.dataset.acceptanceToggle);return;}if(el.dataset.acceptanceRemove){removeAcceptance(el.dataset.acceptanceRemove);return;}if(el.dataset.edit){editRecord(el.dataset.edit,el.dataset.id);return;}if(el.dataset.complete){const t=project().tasks.find(t=>t.id===el.dataset.complete);setStatus('tasks',t.id,t.status==='done'?'todo':'done');return;}if(el.dataset.taskTab){taskTab=el.dataset.taskTab;render();return;}if(el.dataset.view){taskMode=el.dataset.view;render();return;}if(el.dataset.docTab){docTab=el.dataset.docTab;render();return;}if(el.dataset.storyType){storyType=el.dataset.storyType;render();return;}if(el.dataset.addStatus){editRecord('tasks',null,{status:el.dataset.addStatus});return;}if(el.dataset.switch){enterProject(el.dataset.switch);return;}if(el.dataset.editorTab){switchEditorTab(el.dataset.editorTab);return;}if(el.dataset.editDiagram){const g=editor.doc.diagrams.find(g=>g.id===el.dataset.editDiagram);editor.activeDiagram=g.id;editor.tab=g.type;renderEditor();return;}if(el.dataset.openType){const type=el.dataset.openType,id=el.dataset.id;if(!project()[type]?.some(r=>r.id===id)){toast('这条内容已不存在。');return;}closeModal();page=type==='milestones'?'roadmap':type;render();editRecord(type,id);return;}
+ const action=el.dataset.action;if(!action)return;if(action==='close-document'){closeDocument();return;}if(action==='document-fullscreen'){documentLayout?.toggleFullscreen();return;}if(action==='document-half'){documentLayout?.destroy();documentLayout=attachDocumentLayout($('.document-panel'));return;}if(action==='close-modal'){closeModal();return;}if(action==='close-task'){closeTaskPanel();return;}if(action==='cancel-task'){await cancelTask();return;}if(action==='save-task'){await saveTask();return;}if(action==='task-fullscreen'){taskLayout?.toggleFullscreen();return;}if(action==='task-half'){taskLayout?.destroy();taskLayout=attachDocumentLayout($('.task-panel'));return;}if(action==='add-acceptance'){addAcceptance();return;}if(action==='retry-save'){await savedToast('已保存到 Project。');return;}if(action==='reload-disk'){await reloadProjectFiles();return;}if(action==='recover-reload'){await reloadProjectFiles(true);return;}if(action==='migrate-browser'){await migrateBrowser();return;}if(action==='retry-load'){await initializeWorkspace();return;}if(action==='mobile'){$('.sidebar').classList.toggle('open');$('.mobile-backdrop').classList.toggle('open');return;}if(action==='projects')return projectsModal();if(action==='new-project')return editProject();if(action==='confirm-delete-project'){await deleteProjectFromLibrary(el.dataset.id);return;}if(action==='purge-trash')return confirmPurgeTrash();if(action==='confirm-purge-trash'){await purgeTrash();return;}if(action==='confirm-purge-project'){await purgeProject(el.dataset.id);return;}if(action==='confirm-purge-record'){await purgeRecord(el.dataset.type,el.dataset.id);return;}if(action==='edit-project')return editProject(project().id);if(action==='quick-create')return quickCreate();if(action==='new-doc')return openDoc();if(action==='new-mindmap')return openDoc(null,'mindmap');if(action==='new-flowchart')return openDoc(null,'flowchart');if(action.startsWith('new-'))return editRecord(action.slice(4));if(action==='search')return searchModal();if(action==='due'){navigate('tasks');taskMode='list';taskFilter='';const tasks=project().tasks.filter(t=>t.status!=='done'&&t.due&&daysUntil(t.due)<=7).sort((a,b)=>a.due.localeCompare(b.due));modal('未来 7 天 · 任务提醒',tasks.length?tasks.map(t=>`<button class="search-result" data-open-type="tasks" data-id="${t.id}"><span>${esc(t.title)}</span><small>${dateLabel(t.due)}${daysUntil(t.due)<0?' · 已逾期':''}</small></button>`).join(''):'<div class="empty">未来 7 天没有即将到期的任务。</div>');return;}
  if(action==='export'){download(`GameDesignerWorkerSpace-backup-${today()}.json`,JSON.stringify(state,null,2));toast('所有项目备份已导出。');return;}if(action==='import'){$('#import-file').click();return;}if(action==='save-doc'){saveEditor();return;}if(action==='add-diagram')return addDiagram();if(action==='toggle-diagram-source'){editor.diagramSource=!editor.diagramSource;renderEditor();return;}if(action==='expand-diagram'){documentLayout?.toggleFullscreen();return;}
  if(action==='rename-diagram'){const g=activeDiagram();const title=$('.diagram-source .editor-label');title.innerHTML=`<input id="diagram-name" class="input" style="width:100%;padding:6px" aria-label="图表名称" maxlength="180" value="${esc(g.title)}">`;$('#diagram-name').focus();return;}
  if(action==='insert-node'){const g=activeDiagram();g.source+=g.type==='mindmap'?'\n    新的设计分支\n      新的想法':`\n  N${Date.now()}[新的节点]`;$('#diagram-source').value=g.source;autoSaveEditor();renderDiagram(g,'diagram-preview');return;}
@@ -350,8 +390,8 @@ document.addEventListener('submit',async e=>{if(e.target.id==='record-form'){e.p
 document.addEventListener('input',e=>{const el=e.target;if(taskEditor&&el.dataset.taskField){taskEditor.draft[el.dataset.taskField]=el.value;}if(taskEditor&&el.dataset.acceptanceText){const a=taskEditor.draft.acceptance.find(x=>x.id===el.dataset.acceptanceText);if(a)a.text=el.value;}if(taskEditor&&el.dataset.acceptanceDesc){const a=taskEditor.draft.acceptance.find(x=>x.id===el.dataset.acceptanceDesc);if(a)a.desc=el.value;}if(el.id==='library-search'){const cursor=el.selectionStart;libraryQuery=el.value;renderLibrary();const input=$('#library-search');input.focus();if(input.type!=='search')input.setSelectionRange(cursor,cursor);}
 if(el.id==='task-search'){const cursor=el.selectionStart;taskFilter=el.value;render();$('#task-search').focus();$('#task-search').setSelectionRange(cursor,cursor);}if(el.id==='record-search'){const cursor=el.selectionStart;recordFilter=el.value;render();$('#record-search').focus();$('#record-search').setSelectionRange(cursor,cursor);}if(el.id==='global-search')runSearch(el.value);if(el.id==='doc-title'){editor.doc.title=el.value;autoSaveEditor();}if(el.id==='doc-version'){editor.doc.version=el.value.slice(0,20);autoSaveEditor();}if(el.id==='doc-content'&&!composer&&editor){editor.doc.content=el.value;autoSaveEditor();}if(el.id==='diagram-source'){const g=activeDiagram();g.source=el.value;autoSaveEditor();clearTimeout(previewTimer);previewTimer=setTimeout(()=>renderDiagram(g,'diagram-preview'),500);}if(el.id==='diagram-name'){const g=activeDiagram();g.title=el.value;const option=$('#diagram-picker option:checked');if(option)option.textContent=el.value;autoSaveEditor();}});
 document.addEventListener('change',e=>{const el=e.target;if(taskEditor&&el.dataset.taskField){taskEditor.draft[el.dataset.taskField]=el.value;}if(el.id==='task-category'){taskCategory=el.value;render();}if(el.dataset.taskStatus)setStatus('tasks',el.dataset.taskStatus,el.value);if(el.dataset.bugStatus)setStatus('bugs',el.dataset.bugStatus,el.value);if(el.id==='diagram-picker'){editor.activeDiagram=el.value;renderEditor();}if(el.id==='import-file'){importBackup(el.files[0]);el.value='';}});
-document.addEventListener('paste',e=>{if(!taskEditor)return;if(!e.target?.closest?.('.task-panel'))return;const files=[...(e.clipboardData?.files||[])].filter(f=>String(f.type||'').startsWith('image/'));if(!files.length)return;e.preventDefault();const target=imageTargetFrom(e.target);for(const file of files)void uploadTaskImage(file,target);});
-document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'&&!e.defaultPrevented){e.preventDefault();if(page==='library'){$('#library-search')?.focus();return;}if(editor)dismissEditor();searchModal();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&editor){e.preventDefault();saveEditor();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&taskEditor){e.preventDefault();void saveTask();}if(e.key==='Escape'&&!e.defaultPrevented){const light=$('.image-lightbox');if(light){light.remove();return;}if($('#modal-root').children.length)closeModal();else if(editor)closeDocument();else if(taskEditor)closeTaskPanel();}if(e.key==='Tab'&&e.target.id==='diagram-source'){e.preventDefault();const el=e.target,start=el.selectionStart,end=el.selectionEnd;el.setRangeText('  ',start,end,'end');el.dispatchEvent(new Event('input',{bubbles:true}));}});
+
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'&&!e.defaultPrevented){e.preventDefault();if(page==='library'){$('#library-search')?.focus();return;}if(editor)dismissEditor();searchModal();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&editor){e.preventDefault();saveEditor();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&taskEditor){e.preventDefault();void saveTask();}if(e.key==='Escape'&&!e.defaultPrevented){if($('#modal-root').children.length)closeModal();else if(editor)closeDocument();else if(taskEditor)closeTaskPanel();}if(e.key==='Tab'&&e.target.id==='diagram-source'){e.preventDefault();const el=e.target,start=el.selectionStart,end=el.selectionEnd;el.setRangeText('  ',start,end,'end');el.dispatchEvent(new Event('input',{bubbles:true}));}});
 document.addEventListener('dragstart',e=>{const card=e.target.closest('[data-drag]');if(card)e.dataTransfer.setData('text/plain',card.dataset.drag);});
 document.addEventListener('dragover',e=>{const nz=e.target.closest('[data-numeric-drop]');if(nz){if([...(e.dataTransfer?.types||[])].includes('Files')){e.preventDefault();nz.classList.add('drop-active');}return;}const col=e.target.closest('[data-drop]');if(col){e.preventDefault();col.classList.add('drop-active');}});
 document.addEventListener('dragleave',e=>{const nz=e.target.closest('[data-numeric-drop]');if(nz&&!nz.contains(e.relatedTarget))nz.classList.remove('drop-active');const col=e.target.closest('[data-drop]');if(col&&!col.contains(e.relatedTarget))col.classList.remove('drop-active');});

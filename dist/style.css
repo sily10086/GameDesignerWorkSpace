@@ -129,23 +129,8 @@
 .task-form{padding:6px 34px 40px;display:flex;flex-direction:column;gap:20px}
 .task-form .form-grid{gap:0 18px}
 .task-form .field{margin-bottom:0}
-.task-form .field textarea{min-height:132px}
 .task-block{border-top:1px solid #eef1ec;padding-top:18px}
-.task-images-head,.task-acceptance-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
-.task-images-head>span{font-size:11px;color:#809171}
-.task-images-head small{font-size:9px;color:#a4ae9b}
-.task-drop{border:1px dashed #d6e0cf;border-radius:8px;background:#fafcf7;padding:16px;text-align:center;color:#93a087;font-size:11px;line-height:1.9;cursor:pointer}
-.task-drop .icon{width:17px;height:17px;color:#96ac86}
-.task-drop p{margin:4px 0 2px}
-.task-drop small{font-size:9px;color:#adb6a4}
-.task-drop.drop-active{border-color:#8aa87b;background:#f2f7ec}
-.task-image-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px;margin-top:12px}
-.task-image{position:relative;margin:0;border:1px solid #e6ece0;border-radius:7px;overflow:hidden;background:#fff}
-.task-image-open{display:block;width:100%;height:88px;padding:0}
-.task-image-open img{width:100%;height:100%;object-fit:cover;display:block}
-.task-image-remove{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:#ffffffd9;color:#7c8b80;display:grid;place-items:center;box-shadow:0 1px 3px #2a3b2a26}
-.task-image-remove .icon{width:11px;height:11px}
-.task-image-remove:hover{background:#fff;color:#b1766a}
+.task-acceptance-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 .task-acceptance-head h3{font-size:11px;color:#809171;font-weight:400;display:flex;align-items:center;gap:8px}
 .task-acceptance-head .badge{font-size:9px;background:#eef3e8;color:#7b9370;border-radius:4px;padding:2px 6px}
 .task-acceptance-head .btn{margin-left:auto;padding:6px 10px;min-height:28px;font-size:10px}
@@ -158,31 +143,38 @@
 .acceptance-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
 .acceptance-text{width:100%;border:0;background:transparent;font-size:12px;color:#3f5744;padding:2px 0;outline:none}
 .acceptance-item.done .acceptance-text{text-decoration:line-through;color:#9faa9a}
-.acceptance-desc{width:100%;border:1px solid #e6ece0;border-radius:6px;background:#fff;padding:8px 10px;font-size:11px;line-height:1.8;color:#5b6f5d;min-height:56px;resize:vertical}
 .acceptance-remove{color:#b3bdb1;width:20px;height:20px;display:grid;place-items:center;flex-shrink:0}
 .acceptance-remove:hover{color:#b1766a}
 .acceptance-remove .icon{width:12px;height:12px}
 .acceptance-empty{border:1px dashed #dfe7d8;border-radius:8px;padding:14px;font-size:10px;color:#a4ae9b;line-height:1.9;text-align:center}
 .task-meta-badge{display:inline-block;margin-left:6px;padding:1px 5px;border-radius:4px;background:#f0f4eb;color:#84987a;font-size:9px}
 .task-meta-badge.all-done{background:#e9f2e4;color:#6f9566}
-.image-lightbox{position:fixed;inset:0;z-index:300;background:#14231bbb;backdrop-filter:blur(3px);display:grid;place-items:center;padding:40px;cursor:zoom-out}
-.image-lightbox img{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 20px 60px #00000059;background:#fff}
-.image-lightbox-close{position:fixed;top:22px;right:26px;color:#eef3ea;background:#ffffff24;border-radius:50%;width:34px;height:34px;display:grid;place-items:center}
 
-/* 截图直接贴在各自的输入框下面：任务描述一份，每条验收项各一份 */
-.field-images{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
-.field-image{position:relative;margin:0;width:84px;height:62px;border:1px solid #e6ece0;border-radius:6px;overflow:hidden;background:#fff}
-.field-image-open{display:block;width:100%;height:100%;padding:0}
-.field-image-open img{width:100%;height:100%;object-fit:cover;display:block}
-.field-image-remove{position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:#ffffffd9;color:#7c8b80;display:grid;place-items:center;box-shadow:0 1px 3px #2a3b2a26}
-.field-image-remove .icon{width:9px;height:9px}
-.field-image-remove:hover{background:#fff;color:#b1766a}
-.field-image-add{display:inline-flex;align-items:center;gap:5px;height:62px;min-width:104px;padding:0 12px;border:1px dashed #d6e0cf;border-radius:6px;background:#fafcf7;color:#93a087;font-size:10px;line-height:1.4;text-align:left}
-.field-image-add .icon{width:12px;height:12px;flex-shrink:0}
-.field-image-add:hover{border-color:#8aa87b;background:#f2f7ec;color:#6f8a61}
-.acceptance-main .field-images{gap:6px;margin-top:8px}
-.acceptance-main .field-image{width:68px;height:52px}
-.acceptance-main .field-image-add{height:52px;min-width:92px;font-size:9px}
 /* 看板卡片底部一排很窄：角标别换行，日期在窄屏也能收住 */
 .board-card .card-foot{flex-wrap:wrap;gap:4px 6px}
 .card-foot .task-meta-badge{white-space:nowrap}
+
+/* ── 任务正文：直接用文档同款编辑器，只把尺寸收敛到面板里 ────────────────── */
+.task-rich{border:1px solid #e6ece0;border-radius:8px;background:#fff;transition:border-color .15s,box-shadow .15s}
+.task-rich:focus-within{border-color:#a8c29a;box-shadow:0 0 0 3px #eef4e7}
+.task-rich .rich-toolbar{padding:3px 8px;gap:0;border-bottom:1px solid #f0f3ec}
+.task-rich .rich-toolbar button{height:24px;min-width:22px;font-size:11px}
+.task-rich .rich-toolbar i{height:14px;margin:0 2px}
+.task-rich .rich-toolbar select{width:70px;font-size:10px;padding:2px}
+.task-rich .rich-toolbar button[data-rich-command=find],.task-rich .rich-toolbar button[data-rich-command=outline],.task-rich .rich-toolbar button[data-rich-command=source],.task-rich .rich-toolbar button[data-rich-command=read]{display:none}
+.task-rich .rich-workspace{min-height:0}
+.task-rich .rich-document{padding:10px 14px 6px}
+.task-rich .rich-editor .tiptap{min-height:104px;font-size:12px;line-height:1.9}
+.task-rich .rich-editor .tiptap p{margin:0 0 8px}
+.task-rich .rich-editor .tiptap h1{font-size:17px;margin:10px 0 8px}
+.task-rich .rich-editor .tiptap h2{font-size:15px;margin:10px 0 6px}
+.task-rich .rich-editor .tiptap h3{font-size:13px;margin:8px 0 6px}
+.task-rich .rich-editor .tiptap img{border-radius:5px;max-height:380px;object-fit:contain}
+.task-rich .rich-writing-hint{display:none}
+.task-rich .rich-outline{display:none!important}
+.task-rich .composer-loading{padding:12px 14px;font-size:11px}
+.task-rich-hint{display:block;margin-top:2px;font-size:9px;color:#a4ae9b;font-weight:400;letter-spacing:0}
+.task-rich-small .rich-toolbar button:not([data-rich-command=image]):not([data-rich-command=imageLink]){display:none}
+.task-rich-small .rich-toolbar i,.task-rich-small .rich-toolbar select,.task-rich-small .rich-toolbar .rich-toolbar-spacer{display:none}
+.task-rich-small .rich-document{padding:8px 10px 4px}
+.task-rich-small .rich-editor .tiptap{min-height:66px}
