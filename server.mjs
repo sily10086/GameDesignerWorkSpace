@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {randomUUID} from 'node:crypto';
+import {spawn} from 'node:child_process';
+import {readSpreadsheet} from './xlsx-read.mjs';
 import {ProjectStore,StorageError,MAX_IMAGE_BYTES} from './storage.mjs';
 import {RepositoryManager} from './vcs.mjs';
 import {toolStatus} from './runtime-tools.mjs';
@@ -52,10 +54,32 @@ export async function createServer({root=appRoot,dataDirectory=process.env.GDWS_
    if(pathname==='/api/tools'&&req.method==='GET')return send(res,200,await toolStatus());
    if(pathname==='/api/projects/link'&&req.method==='POST'){const body=await readBody(req);return send(res,200,await store.serialize(()=>repositories.importLink(body)));}
    if(pathname==='/api/projects/attach'&&req.method==='POST'){const body=await readBody(req);return send(res,200,await store.serialize(()=>repositories.attach(body.directory,Boolean(body.replace))));}
+   const numericRoute=pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]+)\/numerics(?:\/([A-Za-z0-9_-]+)(\/preview|\/open)?)?$/);
+   if(numericRoute){const [,id,rid,op]=numericRoute;
+    if(req.method==='POST'&&!rid){
+     const recordId=String(req.headers['x-record-id']||'');if(!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(recordId))throw new StorageError('数值表 ID 无效。',400);
+     const filename=decodeURIComponent(String(req.headers['x-file-name']||'sheet.xlsx'));
+     const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>20*1024*1024)throw new StorageError('数值表超过 20 MB。',413);chunks.push(chunk);}
+     return send(res,201,await store.serialize(()=>store.writeNumericFile(id,recordId,filename,Buffer.concat(chunks))));
+    }
+    if(rid&&op==='/preview'&&req.method==='GET'){
+     const {filename,data}=await store.serialize(()=>store.readNumericFile(id,rid));
+     let parsed;try{parsed=readSpreadsheet(data,filename);}catch(error){throw new StorageError(error.message||'无法解析该表格。',422);}
+     return send(res,200,parsed);
+    }
+    if(rid&&op==='/open'&&req.method==='POST'){
+     const {filename}=await store.serialize(()=>store.readNumericFile(id,rid));
+     const file=path.join(await store.numericFolder(id,rid),filename);
+     const [cmd,args]=process.platform==='win32'?['cmd.exe',['/c','start','',file]]:process.platform==='darwin'?['open',[file]]:['xdg-open',[file]];
+     spawn(cmd,args,{detached:true,stdio:'ignore'}).unref();
+     return send(res,200,{opened:true,filename});
+    }
+    return send(res,405,{error:'不支持的数值表请求。'});
+   }
    const projectRoute=pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]+)\/(status|bind|upload|update|separate|detach)$/);
    if(projectRoute){const [,id,action]=projectRoute;if(req.method==='GET'&&action==='status')return send(res,200,await store.serialize(()=>repositories.status(id)));if(req.method==='POST'){const body=await readBody(req);return send(res,200,await store.serialize(()=>action==='status'?repositories.status(id,body.credentials):action==='bind'?repositories.bind(id,body):action==='upload'?repositories.upload(id,body):action==='update'?repositories.update(id,body.credentials):action==='detach'?store.detach(id):store.separate(id).then(directory=>({directory}))));}}
    if(pathname==='/api/trash/purge'&&req.method==='POST'){const body=await readBody(req);if(!Array.isArray(body.ids)||!body.ids.length)throw new StorageError('需要指定要清理的项目。');return send(res,200,await store.save(body.base,body.state,{purge:body.ids}));}
-   const recordPurgeRoute=pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]+)\/records\/(tasks|docs|world|characters|assets|bugs|logs|milestones)\/([A-Za-z0-9_-]+)\/purge$/);
+   const recordPurgeRoute=pathname.match(/^\/api\/projects\/([A-Za-z0-9_-]+)\/records\/(tasks|docs|world|characters|assets|bugs|logs|milestones|stories|numerics)\/([A-Za-z0-9_-]+)\/purge$/);
    if(recordPurgeRoute&&req.method==='POST'){const [,id,type,recordId]=recordPurgeRoute;await readBody(req);return send(res,200,await store.serialize(()=>store.purgeRecordFile(id,type,recordId)));}
    if(pathname==='/api/workspace'&&req.method==='PUT'){const body=await readBody(req);return send(res,200,await store.save(body.base,body.state));}
    if(pathname==='/api/migrate-browser'&&req.method==='POST'){const body=await readBody(req);return send(res,200,await store.importLegacy(body.state));}

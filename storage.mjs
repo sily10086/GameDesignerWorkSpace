@@ -115,11 +115,12 @@ export class ProjectStore {
       ? await this.existsDoc(directory,recordId)
       : await this.existsFile(path.join(directory,type,recordId+'.json'));
     if(exists)throw new StorageError('这条记录还在项目文件中，未执行清理。',409);
-    const target=type==='docs'?path.join(directory,'docs',recordId):path.join(directory,type,recordId+'.json');
+    const target=type==='docs'?path.join(directory,'docs',recordId):type==='numerics'?path.join(directory,'numerics',recordId):path.join(directory,type,recordId+'.json');
     await this.checkParents(target);
     const blocked=this.unsafePurgeTarget(target);if(blocked)throw new StorageError(blocked,409);
-    if(type==='docs')await fs.rm(target,{recursive:true,force:true});
+    if(type==='docs'||type==='numerics')await fs.rm(target,{recursive:true,force:true});
     else await fs.rm(target,{force:true});
+    if(type==='numerics')await fs.rm(path.join(directory,'numerics',recordId+'.json'),{force:true});
     await this.prune(path.dirname(target));
     return {removed:target};
   }
@@ -140,6 +141,27 @@ export class ProjectStore {
     const folder=await this.documentImageFolder(id,docId),file=path.join(folder,name);await this.checkParents(file);
     const stat=await fs.stat(file);if(!stat.isFile()||stat.size>MAX_BYTES)throw new StorageError('图片不存在或过大。',404);
     return {file,data:await fs.readFile(file)};
+  }
+  async numericFolder(id,recordId){
+    if(!safeId(id)||!safeId(recordId))throw new StorageError('数值表参数无效。');
+    const folder=path.join(this.getLocation(id),'numerics',recordId);await this.checkParents(path.join(folder,'probe'));return folder;
+  }
+  async writeNumericFile(id,recordId,filename,data){
+    const folder=await this.numericFolder(id,recordId);
+    const safe=path.basename(String(filename||'sheet.xlsx')).replace(/[\\/:*?"<>|\x00-\x1f]/g,'_');
+    if(!/\.(xlsx|xls|csv)$/i.test(safe))throw new StorageError('只支持 .xlsx / .xls / .csv 文件。',415);
+    const file=path.join(folder,safe);await this.checkParents(file);await fs.mkdir(folder,{recursive:true});
+    // 一张数值表只保留一个表格文件：换文件时先清掉同目录的旧表格，避免预览读到上一个文件。
+    try{for(const old of await fs.readdir(folder))if(old!==safe&&/\.(xlsx|xls|csv)$/i.test(old))await fs.rm(path.join(folder,old),{force:true});}catch{}
+    await fs.writeFile(file,data);return {file:safe,size:data.length};
+  }
+  async readNumericFile(id,recordId){
+    const folder=await this.numericFolder(id,recordId);
+    const entries=await fs.readdir(folder);const name=entries.find(n=>!n.startsWith('.')&&/\.(xlsx|xls|csv)$/i.test(n));
+    if(!name)throw new StorageError('数值表文件不存在。',404);
+    const file=path.join(folder,name);await this.checkParents(file);
+    const stat=await fs.stat(file);if(!stat.isFile()||stat.size>MAX_BYTES)throw new StorageError('数值表不存在或过大。',404);
+    return {filename:name,data:await fs.readFile(file)};
   }
   async attachment(id,relative){
     if(!safeId(id)||typeof relative!=='string'||relative.split('/').some(part=>!part||part==='.'||part==='..'||/[\\\x00-\x1f:]/.test(part)))throw new StorageError('附件路径无效。',400);

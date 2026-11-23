@@ -16,5 +16,109 @@
 .card-delete svg{width:14px;height:14px}
 .card-has-delete:hover .card-delete,.card-delete:focus-visible{opacity:1}
 .card-delete:hover{background:#a77b68;color:#fff}
+/* 删除角标统一挂在卡片右上角：头部标签行预留角标宽度，避免被压住。 */
+.card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding-right:32px}
+/* 列表行（任务 / Bug）的角标垂直居中，右侧预留空间不遮挡标签与头像。 */
+.task-row.card-has-delete,.bug-row.card-has-delete{padding-right:56px}
+.task-row>.card-delete,.bug-row>.card-delete{top:50%;transform:translateY(-50%)}
 /* 文档卡片改成 article 包裹 + 内部按钮，内部按钮需还原成整块可点、无原生按钮外观。 */
 .card-open{display:block;width:100%;padding:0;border:none;background:none;text-align:left;color:inherit;cursor:pointer}
+/* notice 内按钮为 inline-flex：带 svg 的按钮基线取图标底边，会被基线对齐抬高；统一顶对齐保证整排按钮齐平。 */
+.library-issues .notice .btn{vertical-align:top}
+/* 文档结构：视图切换 / 表格 / 蓝图式链接图 */
+.doc-view-switch{display:inline-flex;gap:6px;margin-left:auto}
+.doc-table-wrap{overflow:auto;background:#fff;border:1px solid var(--line);border-radius:10px}
+.doc-table{width:100%;border-collapse:collapse;font-size:11px}
+.doc-table th{text-align:left;padding:10px 12px;background:#f4f7f0;color:#7d897c;font-weight:500;border-bottom:1px solid var(--line);white-space:nowrap}
+.doc-table td{padding:10px 12px;border-bottom:1px solid #f0f2ec;vertical-align:middle;color:#5c6b52}
+.doc-table tbody tr:hover{background:#fafcf7}
+.doc-table-title{border:none;background:none;padding:0 0 4px;color:#34735a;font-size:12px;font-weight:500;cursor:pointer;text-align:left;display:block;border-bottom:1px solid #c9d2c0;margin-bottom:4px}
+.doc-table-title:hover{text-decoration:underline}
+.doc-name{display:inline-flex;flex-direction:column;align-items:flex-start}
+.doc-name .doc-version-tag{margin:0}
+.doc-group-cell{background:#f4f7f0;border-right:1px solid var(--line);vertical-align:middle;text-align:left;padding:10px 12px}
+.doc-group-name{display:block;font-size:12px;font-weight:600;color:#34735a}
+.doc-group-sub{display:block;font-size:9px;color:#a2aa97;margin-top:3px}
+.doc-path{display:inline-flex;align-items:center;color:#829673;white-space:nowrap}
+.doc-path-branch{display:inline-block;width:10px;height:10px;border-left:1px solid #c9d2c0;border-bottom:1px solid #c9d2c0;margin-right:6px;border-bottom-left-radius:4px}
+.doc-parent-select{max-width:160px;font-size:10px;padding:5px 6px}
+.doc-link-count{min-width:26px;height:24px;border:1px solid #dde4d8;background:#f4f7f0;border-radius:6px;color:#34735a;cursor:pointer;font-size:10px}
+.doc-link-count:hover{background:#34735a;color:#fff}
+.doc-table-date{color:#a2aa97;white-space:nowrap}
+.doc-table-actions{white-space:nowrap}
+.doc-table-actions .btn{padding:5px 8px;min-height:26px;font-size:10px}
+.doc-graph-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px}
+.doc-graph-toolbar .btn{padding:6px 10px;min-height:28px;font-size:10px}
+.doc-graph-toggle{display:inline-flex;align-items:center;gap:6px;font-size:10px;color:#7d897c}
+.doc-graph-legend{display:inline-flex;align-items:center;gap:6px;font-size:10px;color:#829673}
+.doc-graph-legend i{width:18px;height:0;border-top:2px solid;display:inline-block;margin-left:8px}
+.lg-manual{border-color:#34735a}
+.lg-wiki{border-color:#7d9871;border-top-style:dashed}
+.lg-hier{border-color:#a77b68;border-top-style:solid;border-top-width:3px}
+.doc-graph-hint{flex-basis:100%;font-size:10px;color:#a2aa97}
+.doc-graph{position:relative;height:560px;background:#fbfdf9 radial-gradient(#e8efe2 1px,transparent 1px);background-size:22px 22px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.doc-graph-svg{width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+.dg-edge{fill:none;stroke:#34735a;stroke-width:2;cursor:pointer}
+.dg-edge.wiki{stroke:#7d9871;stroke-dasharray:6 4}
+.dg-edge.selected{stroke:#a77b68;stroke-width:3.5}
+.dg-edge.temp{stroke:#a77b68;stroke-dasharray:4 4;pointer-events:none}
+.dg-edge.temp.parent{stroke:#34735a}
+.dg-hit{fill:none;stroke:transparent;stroke-width:18;pointer-events:stroke;cursor:pointer}
+.doc-graph-mode{display:inline-flex;align-items:center;gap:6px;font-size:10px;color:#7d897c}
+.doc-graph-mode .select{font-size:10px;padding:4px 6px;min-height:26px}
+.dg-hier{fill:none;stroke:#a77b68;stroke-width:3;stroke-linecap:round;pointer-events:none}
+.dg-node{cursor:grab}
+.dg-body{fill:#fff;stroke:#dde4d8;stroke-width:1;filter:drop-shadow(0 2px 3px rgba(60,80,50,.08))}
+.dg-node:hover .dg-body{stroke:#34735a}
+.dg-accent.d0{fill:#34735a}.dg-accent.d1{fill:#7d9871}.dg-accent.d2{fill:#a77b68}.dg-accent.d3{fill:#b08968}
+.dg-title{font-size:12px;fill:#3c4a35;font-weight:500}
+.dg-sub{font-size:9px;fill:#a2aa97}
+.dg-port{fill:#f4f7f0;stroke:#7d9871;stroke-width:1.5}
+.dg-port.out{fill:#34735a;stroke:#34735a;cursor:crosshair}
+.dg-port.out:hover{fill:#a77b68;stroke:#a77b68}
+.dg-port.in{cursor:copy}
+.doc-links-panel h4{margin:14px 0 6px;font-size:11px;color:#7d897c}
+.doc-links-path{font-size:10px;color:#829673;background:#f4f7f0;padding:6px 8px;border-radius:6px}
+.doc-link-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f2ec}
+.doc-link-open{border:none;background:none;padding:0;color:#34735a;cursor:pointer;font-size:11px;text-align:left}
+.doc-link-open:hover{text-decoration:underline}
+.doc-link-row .btn{margin-left:auto;padding:4px 8px;min-height:24px;font-size:10px}
+.doc-link-row .tag{margin-left:auto}
+.doc-links-empty{font-size:10px;color:#a2aa97}
+.doc-link-add{display:flex;gap:8px}
+.doc-link-add .select{flex:1}
+.story-body{min-height:220px;line-height:1.9}
+.story-checks{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:7px;background:#f9faf7}
+.story-check{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#5c6b52;cursor:pointer;padding:3px 6px;border-radius:5px}
+.story-check:hover{background:#eef3e8}
+.story-check input{accent-color:#34735a}
+.story-check-group{font-size:10px;color:#7d9871;font-weight:600;margin-left:4px}
+.story-cast{font-size:9px;padding:3px 6px;border-radius:4px;background:#eef3e8;color:#7d9871}
+.doc-table-wrap::-webkit-scrollbar,.doc-graph::-webkit-scrollbar{width:10px;height:10px}
+.doc-table-wrap::-webkit-scrollbar-track,.doc-graph::-webkit-scrollbar-track{background:#f4f7f0}
+.doc-table-wrap::-webkit-scrollbar-thumb,.doc-graph::-webkit-scrollbar-thumb{background:#c9d2c0;border-radius:6px}
+.doc-table-wrap::-webkit-scrollbar-thumb:hover,.doc-graph::-webkit-scrollbar-thumb:hover{background:#7d9871}
+
+/* 数值策划：Excel 拖放区、卡片文件信息、表格预览 */
+.numeric-drop{display:flex;align-items:center;gap:10px;flex:1;min-height:44px;padding:8px 14px;border:1px dashed #c9d6bf;border-radius:10px;background:#fafbf7;color:#7f8f72;font-size:12px}
+.numeric-drop .icon{width:16px;height:16px;color:#8fa87f;flex:none}
+.numeric-drop span{flex:1;line-height:1.5}
+.numeric-drop.drop-active{border-color:#5a8c5a;background:#eef5e8;color:#4a7a4a}
+.numeric-file{display:flex;align-items:center;gap:6px;width:100%;margin:10px 0 0;padding:7px 10px;border:1px solid #e3e8dc;border-radius:7px;background:#f7faf3;color:#4a7a4a;font-size:11px;cursor:pointer;text-align:left;font-family:inherit}
+.numeric-file:hover{background:#eef5e8;border-color:#bfd3b2}
+.numeric-file .icon{width:13px;height:13px;flex:none}
+.numeric-file-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.numeric-file-size{color:#93a189;font-size:10px;flex:none}
+.numeric-file.empty-file{display:block;border-style:dashed;background:#fafbf7;color:#a0ac95;cursor:default;text-align:center;padding:9px}
+.numeric-card .numeric-notes{white-space:pre-wrap;color:#8a9c7a}
+.numeric-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px -24px -24px;padding:12px 24px;border-top:1px solid var(--line)}
+.btn.small{min-height:auto;padding:5px 10px;font-size:10px;border-radius:6px;gap:5px}
+.btn.small .icon{width:12px;height:12px}
+.sheet-wrap{overflow:auto;max-height:56vh;border:1px solid var(--line);border-radius:8px;margin-top:12px;background:#fff}
+.sheet-table{border-collapse:collapse;font-size:12px;min-width:100%}
+.sheet-table th,.sheet-table td{border:1px solid #eef1ea;padding:5px 10px;text-align:left;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}
+.sheet-table th{background:#f4f7f0;color:#5b6b52;position:sticky;top:0;font-weight:600;z-index:1}
+.sheet-table tr:nth-child(even) td{background:#fcfdfa}
+.sheet-note{font-size:11px;color:#94a08a;margin:10px 0 0}
+.sheet-tabs{padding:0;margin:0 0 4px}
+.modal.wide{width:min(1040px,94vw)}
