@@ -180,3 +180,15 @@
 .task-rich-small .rich-editor .tiptap{min-height:66px}
 /* 验收项里的图别把整条撑太高，正文里仍可点开看大图 */
 .task-rich-small .rich-editor .tiptap img{max-height:240px}
+
+/* ── 完成备注：任务进入「待验收 / 已完成」时才出现 ───────────────────────── */
+.task-completion-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.task-completion-head h3{font-size:11px;color:#809171;font-weight:400;display:flex;align-items:center;gap:8px}
+.task-completion-head .badge{font-size:9px;background:#eef3e8;color:#7b9370;border-radius:4px;padding:2px 6px}
+.task-completion-date{margin-left:auto;font-size:9px;color:#a4ae9b}
+.task-completion-hint{margin:0 0 10px;font-size:10px;line-height:1.7;color:#a4ae9b}
+.task-meta-badge.note{background:#fdf4e5;color:#a4833f}
+
+/* 任务里的编辑器占位文字换成各自该写的内容 */
+.task-rich[data-rich-kind="completion"] .rich-editor .tiptap .is-editor-empty:first-child:before{content:"写清改了什么、怎么验证的，截图可以直接粘在这里…"}
+.task-rich[data-rich-kind="acceptance"] .rich-editor .tiptap .is-editor-empty:first-child:before{content:"这条怎么算通过？写具体一点，可贴截图…"}

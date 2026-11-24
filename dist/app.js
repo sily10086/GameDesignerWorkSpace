@@ -45,6 +45,7 @@ function taskDraftFrom(record,preset){
   const draft={...base,...preset};
   draft.acceptance=Array.isArray(draft.acceptance)?draft.acceptance.filter(a=>a&&a.id).map(a=>({id:a.id,text:String(a.text||''),desc:String(a.desc||''),done:Boolean(a.done),images:normalizeImageList(a.images)})):[];
   draft.images=Array.isArray(draft.images)?draft.images.filter(i=>i&&i.name).map(i=>({name:i.name,size:Number(i.size)||0})):[];
+  draft.completion=String(draft.completion||'');draft.completedAt=String(draft.completedAt||'');
   return draft;
 }
 function openTask(id,preset={}){
@@ -72,7 +73,8 @@ async function discardTaskDraft(state){
 function taskAcceptanceStats(draft){const list=draft.acceptance||[];return {done:list.filter(a=>a.done).length,total:list.length};}
 function taskMetaBadges(t){
   const acc=Array.isArray(t.acceptance)?t.acceptance:[],done=acc.filter(a=>a.done).length,imgs=taskImageCount(t);
-  return `${acc.length?`<span class="task-meta-badge ${done===acc.length?'all-done':''}">验收 ${done}/${acc.length}</span>`:''}${imgs?`<span class="task-meta-badge">参考图 ${imgs}</span>`:''}`;
+  const note=String(t.completion||'').trim()?'1':'';
+  return `${acc.length?`<span class="task-meta-badge ${done===acc.length?'all-done':''}">验收 ${done}/${acc.length}</span>`:''}${note?'<span class="task-meta-badge note">完成备注</span>':''}${imgs?`<span class="task-meta-badge">参考图 ${imgs}</span>`:''}`;
 }
 function normalizeImageList(list){return Array.isArray(list)?list.filter(i=>i&&i.name).map(i=>({name:i.name,size:Number(i.size)||0})):[];}
 // ── 任务正文用文档同款编辑器：截图直接粘在正文里，图跟文字一起排 ──────────────
@@ -89,11 +91,13 @@ function taskRichKey(kind,targetId){return kind+':'+targetId;}
 function richDraftValue(kind,targetId){
   if(!taskEditor)return '';
   if(kind==='acceptance'){const item=taskEditor.draft.acceptance.find(a=>a.id===targetId);return item?String(item.desc||''):'';}
+  if(kind==='completion')return String(taskEditor.draft.completion||'');
   return String(taskEditor.draft.description||'');
 }
 function setRichDraft(kind,targetId,markdown){
   if(!taskEditor)return;
   if(kind==='acceptance'){const item=taskEditor.draft.acceptance.find(a=>a.id===targetId);if(item)item.desc=markdown;return;}
+  if(kind==='completion'){taskEditor.draft.completion=markdown;return;}
   taskEditor.draft.description=markdown;
 }
 // 保存、重排验收项、关闭面板之前，都要先把编辑器里的内容读回草稿。
@@ -140,7 +144,7 @@ function mountTaskRichFields(){$$('.task-rich[data-rich-kind]').forEach(mount=>{
 function markdownImageCount(markdown){return (String(markdown||'').match(/!\[[^\]]*\]\([^)]*\)/g)||[]).length;}
 function taskImageCount(t){
   const legacy=(Array.isArray(t.images)?t.images.length:0)+(Array.isArray(t.acceptance)?t.acceptance.reduce((n,a)=>n+((a.images||[]).length),0):0);
-  const inline=markdownImageCount(t.description)+(Array.isArray(t.acceptance)?t.acceptance.reduce((n,a)=>n+markdownImageCount(a.desc),0):0);
+  const inline=markdownImageCount(t.description)+markdownImageCount(t.completion)+(Array.isArray(t.acceptance)?t.acceptance.reduce((n,a)=>n+markdownImageCount(a.desc),0):0);
   return legacy+inline;
 }
 function markdownSummary(markdown,max=86){
@@ -156,7 +160,7 @@ function markdownSummary(markdown,max=86){
 // 保存之后清理：这次上传了、但正文里已经删掉的图片，从任务目录删掉，别留孤儿文件。
 async function pruneTaskImages(captured){
   if(!captured||!captured.uploaded.length)return;
-  const markdown=[captured.draft.description,...(captured.draft.acceptance||[]).map(a=>a.desc)].join('\n');
+  const markdown=[captured.draft.description,captured.draft.completion,...(captured.draft.acceptance||[]).map(a=>a.desc)].join('\n');
   const used=new Set();
   for(const match of markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)){
     const name=match[1].split('/').pop();
@@ -171,12 +175,36 @@ async function pruneTaskImages(captured){
 function acceptanceRow(item,index){
   return `<div class="acceptance-item ${item.done?'done':''}" data-acceptance-row="${item.id}"><button type="button" class="acceptance-check ${item.done?'done':''}" data-acceptance-toggle="${item.id}" aria-label="${item.done?'标记为未完成':'标记为已完成'}">${item.done?icon('check'):''}</button><div class="acceptance-main"><input class="acceptance-text" data-acceptance-text="${item.id}" maxlength="200" placeholder="第 ${index+1} 条验收：写成能验证的一句话" aria-label="第 ${index+1} 条验收项" value="${esc(item.text)}">${taskRichMarkup('acceptance',item.id,'task-rich-small')}</div><button type="button" class="acceptance-remove" data-acceptance-remove="${item.id}" aria-label="删除这条验收项">${icon('close')}</button></div>`;
 }
+// 完成备注：任务做到「待验收 / 已完成」时才显示。写清怎么做的、贴截图，
+// 由验收方（人或主程序）照这段内容核对，对不上就打回修改。
+function taskNeedsCompletion(t){return Boolean(t)&&(t.status==='review'||t.status==='done');}
+function completionBlockMarkup(){
+  if(!taskEditor||!taskNeedsCompletion(taskEditor.draft))return '';
+  const at=taskEditor.draft.completedAt||'';
+  return `<div class="task-block task-completion"><div class="task-completion-head"><h3>完成备注<span class="badge">怎么完成的</span></h3>${at?`<span class="task-completion-date">完成于 ${esc(at)}</span>`:''}</div><p class="task-completion-hint">写清改了什么、怎么验证的，截图直接粘进正文。验收时照这段内容核对，对不上就打回修改。</p>${taskRichMarkup('completion','')}</div>`;
+}
+function refreshCompletionBlock(){
+  if(!taskEditor)return;
+  const form=$('.task-form');if(!form)return;
+  const host=$('.task-completion',form),want=taskNeedsCompletion(taskEditor.draft);
+  if(want&&!host){form.insertAdjacentHTML('beforeend',completionBlockMarkup());mountTaskRichFields();return;}
+  if(!want&&host){
+    const key=taskRichKey('completion',''),instance=taskEditor.richEditors.get(key);
+    // 先把写了一半的备注读回草稿，再从界面上收起来，别让内容凭空消失。
+    if(instance){
+      try{const markdown=instance.getMarkdown?.();if(typeof markdown==='string')setRichDraft('completion','',markdown);}catch{}
+      try{instance.destroy?.();}catch{}
+      taskEditor.richEditors.delete(key);
+    }
+    host.remove();
+  }
+}
 function renderTaskPanel(first=false){
   if(!taskEditor)return;
   const {draft,isNew}=taskEditor,stats=taskAcceptanceStats(draft);
   let root=$('#document-root');if(!root){root=document.createElement('div');root.id='document-root';document.body.append(root);}
   const firstOpen=first||!root.children.length;
-  root.innerHTML=`<section class="document-panel modal editor task-panel" role="region" aria-label="任务编辑面板"><div class="document-resizer" role="separator" tabindex="0" aria-label="调整面板宽度" aria-orientation="vertical" aria-valuenow="50" aria-valuemin="42" aria-valuemax="80" title="拖动调整宽度 · 双击恢复半屏"><span></span></div><header class="document-topbar"><div>${icon('tasks')}<span>${esc(project().name)} <b>/</b> 任务</span></div><div><button class="document-icon-button" data-action="task-half" title="恢复半屏" aria-label="恢复半屏">◫</button><button class="document-icon-button" data-action="task-fullscreen" title="全屏编辑" aria-label="全屏编辑">${icon('expand')}</button><button class="document-icon-button" data-action="close-task" title="关闭（Esc）" aria-label="关闭任务面板">${icon('close')}</button></div></header><div class="document-title-bar"><div class="document-type">TASK <span>${draft.number?'TASK-'+String(draft.number).padStart(3,'0'):'新任务'}</span></div><input id="task-panel-title" data-task-field="title" class="doc-edit-title" aria-label="任务名称" maxlength="180" placeholder="任务名称" value="${esc(draft.title)}"><div class="document-meta"><span class="saved-time">${diskLabel()}</span><span>${isNew?'填好后点「保存任务」写入 Project':'改完点「保存任务」生效'}</span></div></div><div class="document-body"><div class="task-form"><div class="form-grid"><div class="field"><label for="task-panel-category">分类</label><select id="task-panel-category" data-task-field="category">${['策划','程序','美术','音频','其他'].map(c=>`<option value="${c}" ${draft.category===c?'selected':''}>${c}</option>`).join('')}</select></div><div class="field"><label for="task-panel-priority">优先级</label><select id="task-panel-priority" data-task-field="priority">${['高','中','低'].map(c=>`<option value="${c}" ${draft.priority===c?'selected':''}>${c}</option>`).join('')}</select></div><div class="field"><label for="task-panel-status">状态</label><select id="task-panel-status" data-task-field="status">${Object.entries(statuses).map(([k,v])=>`<option value="${k}" ${draft.status===k?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label for="task-panel-due">截止日期</label><input id="task-panel-due" data-task-field="due" type="date" value="${esc(draft.due||'')}"></div><div class="field"><label for="task-panel-owner">负责人</label><input id="task-panel-owner" data-task-field="owner" value="${esc(draft.owner||'')}"></div></div><div class="field"><label>描述与验收标准<span class="task-rich-hint">截图可以直接粘进正文，和文档一样</span></label>${taskRichMarkup('task','')}</div><div class="task-block"><div class="task-acceptance-head"><h3>验收清单<span class="badge">${stats.total?stats.done+'/'+stats.total:'还没有'}</span></h3><button class="btn" data-action="add-acceptance">${icon('plus')}添加验收项</button></div><div class="acceptance-list">${draft.acceptance.map(acceptanceRow).join('')||'<div class="acceptance-empty">把这条任务拆成几条能勾掉的验收项。每条都能单独写一段说明，验收时一条条对。</div>'}</div></div></div></div><footer class="document-footer">${isNew?'':`<button class="danger-link" data-recycle="tasks" data-id="${draft.id}">移入回收站</button>`}<span></span><button class="btn" data-action="cancel-task">取消</button><button class="btn primary" data-action="save-task">${icon('check')}保存任务</button></footer></section>`;
+  root.innerHTML=`<section class="document-panel modal editor task-panel" role="region" aria-label="任务编辑面板"><div class="document-resizer" role="separator" tabindex="0" aria-label="调整面板宽度" aria-orientation="vertical" aria-valuenow="50" aria-valuemin="42" aria-valuemax="80" title="拖动调整宽度 · 双击恢复半屏"><span></span></div><header class="document-topbar"><div>${icon('tasks')}<span>${esc(project().name)} <b>/</b> 任务</span></div><div><button class="document-icon-button" data-action="task-half" title="恢复半屏" aria-label="恢复半屏">◫</button><button class="document-icon-button" data-action="task-fullscreen" title="全屏编辑" aria-label="全屏编辑">${icon('expand')}</button><button class="document-icon-button" data-action="close-task" title="关闭（Esc）" aria-label="关闭任务面板">${icon('close')}</button></div></header><div class="document-title-bar"><div class="document-type">TASK <span>${draft.number?'TASK-'+String(draft.number).padStart(3,'0'):'新任务'}</span></div><input id="task-panel-title" data-task-field="title" class="doc-edit-title" aria-label="任务名称" maxlength="180" placeholder="任务名称" value="${esc(draft.title)}"><div class="document-meta"><span class="saved-time">${diskLabel()}</span><span>${isNew?'填好后点「保存任务」写入 Project':'改完点「保存任务」生效'}</span></div></div><div class="document-body"><div class="task-form"><div class="form-grid"><div class="field"><label for="task-panel-category">分类</label><select id="task-panel-category" data-task-field="category">${['策划','程序','美术','音频','其他'].map(c=>`<option value="${c}" ${draft.category===c?'selected':''}>${c}</option>`).join('')}</select></div><div class="field"><label for="task-panel-priority">优先级</label><select id="task-panel-priority" data-task-field="priority">${['高','中','低'].map(c=>`<option value="${c}" ${draft.priority===c?'selected':''}>${c}</option>`).join('')}</select></div><div class="field"><label for="task-panel-status">状态</label><select id="task-panel-status" data-task-field="status">${Object.entries(statuses).map(([k,v])=>`<option value="${k}" ${draft.status===k?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label for="task-panel-due">截止日期</label><input id="task-panel-due" data-task-field="due" type="date" value="${esc(draft.due||'')}"></div><div class="field"><label for="task-panel-owner">负责人</label><input id="task-panel-owner" data-task-field="owner" value="${esc(draft.owner||'')}"></div></div><div class="field"><label>描述与验收标准<span class="task-rich-hint">截图可以直接粘进正文，和文档一样</span></label>${taskRichMarkup('task','')}</div><div class="task-block"><div class="task-acceptance-head"><h3>验收清单<span class="badge">${stats.total?stats.done+'/'+stats.total:'还没有'}</span></h3><button class="btn" data-action="add-acceptance">${icon('plus')}添加验收项</button></div><div class="acceptance-list">${draft.acceptance.map(acceptanceRow).join('')||'<div class="acceptance-empty">把这条任务拆成几条能勾掉的验收项。每条都能单独写一段说明，验收时一条条对。</div>'}</div></div>${completionBlockMarkup()}</div></div><footer class="document-footer">${isNew?'':`<button class="danger-link" data-recycle="tasks" data-id="${draft.id}">移入回收站</button>`}<span></span><button class="btn" data-action="cancel-task">取消</button><button class="btn primary" data-action="save-task">${icon('check')}保存任务</button></footer></section>`;
   taskLayout?.destroy();taskLayout=attachDocumentLayout($('.task-panel'));
   mountTaskRichFields();
   if(firstOpen&&!matchMedia('(prefers-reduced-motion: reduce)').matches)$('.task-panel').animate([{transform:'translateX(50px)',opacity:0},{transform:'translateX(0)',opacity:1}],{duration:260,easing:'cubic-bezier(.2,.8,.2,1)'});
@@ -213,6 +241,8 @@ async function saveTask(){
   if(!draft.due)return toast('请选择截止日期。');
   draft.description=String(draft.description||'');
   draft.acceptance=draft.acceptance.filter(a=>String(a.text||'').trim()||String(a.desc||'').trim()||markdownImageCount(a.desc));
+  draft.completion=String(draft.completion||'');
+  if(taskNeedsCompletion(draft)){if(!draft.completedAt)draft.completedAt=today();}else draft.completedAt='';
   draft.updated=today();
   const p=project();
   if(isNew)p.tasks.unshift(draft);else Object.assign(original,draft);
@@ -389,7 +419,7 @@ document.addEventListener('submit',async e=>{if(e.target.id==='record-form'){e.p
  if(e.target.id==='project-form'){e.preventDefault();const form=e.target,data=Object.fromEntries(new FormData(form));data.name=data.name.trim();if(!data.name)return toast('请填写项目名称。');const id=form.dataset.id;if(id){Object.assign(state.projects.find(p=>p.id===id),data);}else{const p=makeProject(data.name,data.genre,data.engine,data.desc);Object.assign(p,data);state.projects.push(p);state.active=null;page='library';libraryDeleted=false;libraryQuery='';}persist();rememberActive();closeModal();await savedToast(id?'项目资料已写入 Project。':'新项目已在 Project 中创建。');}});
 document.addEventListener('input',e=>{const el=e.target;if(taskEditor&&el.dataset.taskField){taskEditor.draft[el.dataset.taskField]=el.value;}if(taskEditor&&el.dataset.acceptanceText){const a=taskEditor.draft.acceptance.find(x=>x.id===el.dataset.acceptanceText);if(a)a.text=el.value;}if(taskEditor&&el.dataset.acceptanceDesc){const a=taskEditor.draft.acceptance.find(x=>x.id===el.dataset.acceptanceDesc);if(a)a.desc=el.value;}if(el.id==='library-search'){const cursor=el.selectionStart;libraryQuery=el.value;renderLibrary();const input=$('#library-search');input.focus();if(input.type!=='search')input.setSelectionRange(cursor,cursor);}
 if(el.id==='task-search'){const cursor=el.selectionStart;taskFilter=el.value;render();$('#task-search').focus();$('#task-search').setSelectionRange(cursor,cursor);}if(el.id==='record-search'){const cursor=el.selectionStart;recordFilter=el.value;render();$('#record-search').focus();$('#record-search').setSelectionRange(cursor,cursor);}if(el.id==='global-search')runSearch(el.value);if(el.id==='doc-title'){editor.doc.title=el.value;autoSaveEditor();}if(el.id==='doc-version'){editor.doc.version=el.value.slice(0,20);autoSaveEditor();}if(el.id==='doc-content'&&!composer&&editor){editor.doc.content=el.value;autoSaveEditor();}if(el.id==='diagram-source'){const g=activeDiagram();g.source=el.value;autoSaveEditor();clearTimeout(previewTimer);previewTimer=setTimeout(()=>renderDiagram(g,'diagram-preview'),500);}if(el.id==='diagram-name'){const g=activeDiagram();g.title=el.value;const option=$('#diagram-picker option:checked');if(option)option.textContent=el.value;autoSaveEditor();}});
-document.addEventListener('change',e=>{const el=e.target;if(taskEditor&&el.dataset.taskField){taskEditor.draft[el.dataset.taskField]=el.value;}if(el.id==='task-category'){taskCategory=el.value;render();}if(el.dataset.taskStatus)setStatus('tasks',el.dataset.taskStatus,el.value);if(el.dataset.bugStatus)setStatus('bugs',el.dataset.bugStatus,el.value);if(el.id==='diagram-picker'){editor.activeDiagram=el.value;renderEditor();}if(el.id==='import-file'){importBackup(el.files[0]);el.value='';}});
+document.addEventListener('change',e=>{const el=e.target;if(taskEditor&&el.dataset.taskField){taskEditor.draft[el.dataset.taskField]=el.value;if(el.dataset.taskField==='status')refreshCompletionBlock();}if(el.id==='task-category'){taskCategory=el.value;render();}if(el.dataset.taskStatus)setStatus('tasks',el.dataset.taskStatus,el.value);if(el.dataset.bugStatus)setStatus('bugs',el.dataset.bugStatus,el.value);if(el.id==='diagram-picker'){editor.activeDiagram=el.value;renderEditor();}if(el.id==='import-file'){importBackup(el.files[0]);el.value='';}});
 
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'&&!e.defaultPrevented){e.preventDefault();if(page==='library'){$('#library-search')?.focus();return;}if(editor)dismissEditor();searchModal();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&editor){e.preventDefault();saveEditor();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&taskEditor){e.preventDefault();void saveTask();}if(e.key==='Escape'&&!e.defaultPrevented){if($('#modal-root').children.length)closeModal();else if(editor)closeDocument();else if(taskEditor)closeTaskPanel();}if(e.key==='Tab'&&e.target.id==='diagram-source'){e.preventDefault();const el=e.target,start=el.selectionStart,end=el.selectionEnd;el.setRangeText('  ',start,end,'end');el.dispatchEvent(new Event('input',{bubbles:true}));}});
 document.addEventListener('dragstart',e=>{const card=e.target.closest('[data-drag]');if(card)e.dataTransfer.setData('text/plain',card.dataset.drag);});

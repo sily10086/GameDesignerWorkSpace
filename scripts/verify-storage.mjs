@@ -86,6 +86,19 @@ try{
  const acceptanceBack=(await new ProjectStore(root).load()).projects[0].tasks.find(t=>t.id===target.id);
  assert.deepEqual(acceptanceBack.acceptance,target.acceptance,'验收清单必须完整往返（含换行、空标题和每条的参考图）');
  assert.deepEqual(acceptanceBack.images,target.images,'参考图清单必须完整往返');
+ // 完成备注：任务做到待验收 / 已完成时写清怎么做的（可带截图），并记下完成日期。
+ const noteBase=await store.load(),withNote=copy(noteBase),noteTask=withNote.projects[0].tasks[0];
+ noteTask.status='done';
+ noteTask.completion='登录界面做完，自测三种错误提示都正常。\n\n![shot.png](/api/projects/p1/tasks/t1/images/abc.png)';
+ noteTask.completedAt='2026-11-24';
+ await store.save(noteBase,withNote);
+ const noteBack=(await new ProjectStore(root).load()).projects[0].tasks.find(t=>t.id===noteTask.id);
+ assert.equal(noteBack.completion,noteTask.completion,'完成备注必须完整往返（含换行与图片 markdown）');
+ assert.equal(noteBack.completedAt,'2026-11-24','完成日期必须完整往返');
+ const badNote=copy(await store.load());badNote.projects[0].tasks[0].completion=12345;
+ await assert.rejects(store.save(await store.load(),badNote),e=>e.status===400,'完成备注不是字符串必须拒绝写入');
+ const badNoteDate=copy(await store.load());badNoteDate.projects[0].tasks[0].completedAt='x'.repeat(40);
+ await assert.rejects(store.save(await store.load(),badNoteDate),e=>e.status===400,'完成日期过长必须拒绝写入');
  const legacyTask=copy(taskBase.projects[0].tasks[1]);delete legacyTask.acceptance;delete legacyTask.images;
  const legacyState=copy(taskBase);legacyState.projects[0].tasks[1]=legacyTask;await store.save(taskBase,legacyState);
  assert.equal((await new ProjectStore(root).load()).projects[0].tasks[1].id,legacyTask.id,'缺新字段的老任务必须仍可读');
@@ -107,7 +120,7 @@ try{
  const dropBase=await store.load(),dropped=copy(dropBase);dropped.projects[0].tasks=dropped.projects[0].tasks.filter(t=>t.id!==imageTask.id);
  await store.save(dropBase,dropped);await store.purgeRecordFile(imageProject.projects[0].id,'tasks',imageTask.id);
  await assert.rejects(fs.stat(taskFolder),e=>e.code==='ENOENT','彻底删除任务后 tasks/<id>/ 目录（含参考图）必须消失');
- console.log('PASS: task acceptance/images round trip, legacy tasks load, invalid acceptance rejected, hashed task images dedupe and purge with the task.');
+ console.log('PASS: task acceptance/images round trip, completion note round trip, legacy tasks load, invalid acceptance or note rejected, hashed task images dedupe and purge with the task.');
 
  const rollbackBase=await store.load(),failed=copy(rollbackBase);failed.projects.push(defaultWorkspace().projects[0]);
  const realApply=store.apply.bind(store);let count=0;store.apply=async(...args)=>{if(++count===3)throw new Error('Simulated disk failure');return realApply(...args);};
